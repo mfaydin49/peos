@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "projectName": "example-javascript-project",
+  "outputLanguage": "tr",
+  "references": {
+    "instructions": [
+      "AGENTS.md"
+    ],
+    "architecture": [],
+    "design": []
+  },
+  "checks": [
+    {
+      "id": "tests",
+      "executable": "npm",
+      "args": [
+        "test",
+        "--",
+        "--runInBand"
+      ],
+      "phases": [
+        "task",
+        "release"
+      ],
+      "required": true,
+      "timeoutMs": 120000
+    },
+    {
+      "id": "build",
+      "executable": "npm",
+      "args": [
+        "run",
+        "build"
+      ],
+      "phases": [
+        "release"
+      ],
+      "required": true,
+      "timeoutMs": 120000
+    }
+  ],
+  "manualChecks": [
+    {
+      "id": "release-environment",
+      "description": "Confirm the target environment and required migration, visual, and performance evidence against project policy; record justified non-applicability.",
+      "phases": [
+        "release"
+      ],
+      "required": true
+    }
+  ]
+}

@@ -1,0 +1,205 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/personal-engineering-os/engineering.config.schema.json",
+  "title": "Personal Engineering OS project configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "projectName",
+    "checks"
+  ],
+  "$comment": "IDs must be unique across checks and manualChecks. Draft 2020-12 cannot express uniqueness by a projected property; runtime validation enforces this additional invariant. Reference containment is lexical; symlink targets require project review.",
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "projectName": {
+      "$ref": "#/$defs/text"
+    },
+    "outputLanguage": {
+      "$ref": "#/$defs/text",
+      "default": "tr"
+    },
+    "references": {
+      "type": "object",
+      "default": {},
+      "additionalProperties": false,
+      "properties": {
+        "instructions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "\\S"
+              },
+              {
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:\\u0000-\\u001f]+$"
+              }
+            ]
+          }
+        },
+        "architecture": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "\\S"
+              },
+              {
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:\\u0000-\\u001f]+$"
+              }
+            ]
+          }
+        },
+        "design": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "allOf": [
+              {
+                "pattern": "\\S"
+              },
+              {
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:\\u0000-\\u001f]+$"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/check"
+      }
+    },
+    "manualChecks": {
+      "type": "array",
+      "default": [],
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/manual"
+      }
+    },
+    "approvalRequiredFor": {
+      "type": "array",
+      "default": [
+        "commit",
+        "push",
+        "pull-request",
+        "deploy",
+        "publish",
+        "migration",
+        "external-write"
+      ],
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "commit",
+          "push",
+          "pull-request",
+          "deploy",
+          "publish",
+          "migration",
+          "external-write"
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "text": {
+      "type": "string",
+      "pattern": "\\S"
+    },
+    "phases": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "task",
+          "release"
+        ]
+      }
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "executable",
+        "args",
+        "phases",
+        "required",
+        "timeoutMs"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/text"
+        },
+        "executable": {
+          "type": "string",
+          "allOf": [
+            {
+              "pattern": "\\S"
+            },
+            {
+              "pattern": "^[^\\u0000]*$"
+            }
+          ]
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[^\\u0000]*$"
+          }
+        },
+        "phases": {
+          "$ref": "#/$defs/phases"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483647
+        }
+      }
+    },
+    "manual": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "description",
+        "phases",
+        "required"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/text"
+        },
+        "description": {
+          "$ref": "#/$defs/text"
+        },
+        "phases": {
+          "$ref": "#/$defs/phases"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}
