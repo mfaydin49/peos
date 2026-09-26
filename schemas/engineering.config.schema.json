@@ -99,7 +99,11 @@
         "deploy",
         "publish",
         "migration",
-        "external-write"
+        "external-write",
+        "outside-project",
+        "download",
+        "dependency-change",
+        "unplanned-database"
       ],
       "uniqueItems": true,
       "items": {
@@ -110,7 +114,11 @@
           "deploy",
           "publish",
           "migration",
-          "external-write"
+          "external-write",
+          "outside-project",
+          "download",
+          "dependency-change",
+          "unplanned-database"
         ]
       }
     }

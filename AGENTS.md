@@ -6,6 +6,15 @@ Missing configuration is a blocker for configured verification, not permission t
 invent commands. Project policy specializes generic defaults; surface unresolved
 conflicts. Use `outputLanguage` for responses (default `tr`); toolkit files are English.
 
+Always apply [authorization](rules/authorization.md). Work already authorized by the
+task or an accepted contract stays authorized: do not ask again for project-local
+implementation, running or stopping the project, applicable tests, browser/simulator
+checks, or agreed local database work. Ask before crossing the project boundary,
+downloading an artifact/package/dataset, uploading or otherwise writing externally,
+adding an unapproved dependency/tool/service, or performing database work that was
+not part of the agreed task. Host sandbox prompts may still be required and never
+grant broader permission than the user gave.
+
 Select only the needed workflow:
 - Feature: task contract → implementation/tests → task checks → review → fixes,
   affected rechecks and material re-review → completion report.

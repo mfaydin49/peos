@@ -2,7 +2,19 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fail } from './cli.mjs';
 
-export const approvals = ['commit', 'push', 'pull-request', 'deploy', 'publish', 'migration', 'external-write'];
+export const approvals = [
+  'commit',
+  'push',
+  'pull-request',
+  'deploy',
+  'publish',
+  'migration',
+  'external-write',
+  'outside-project',
+  'download',
+  'dependency-change',
+  'unplanned-database'
+];
 // Portable slash-separated paths, contained lexically within the target project.
 export const referencePattern = '^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:\\u0000-\\u001f]+$';
 const pathPattern = new RegExp(referencePattern);

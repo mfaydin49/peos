@@ -100,7 +100,7 @@ schema/runtime agreement. No custom JSON Schema engine or undocumented keyword i
 | `references` | Optional `instructions`, `architecture`, `design` path arrays; defaults to `{}` |
 | `checks` | Non-empty list of `id`, `executable`, `args`, `phases`, `required`, `timeoutMs` |
 | `manualChecks` | Optional list of `id`, `description`, `phases`, `required`; defaults to `[]` |
-| `approvalRequiredFor` | Optional action set; defaults to every action enumerated in the schema |
+| `approvalRequiredFor` | Optional action set; defaults to every action enumerated in the schema. Local task execution and verification follow `rules/authorization.md`. |
 
 Unknown fields, duplicate IDs, duplicate phases/references/approval actions and
 invalid types are rejected. Args are ordered and may repeat or be empty strings.
@@ -112,10 +112,13 @@ are for the workflow to assess; the validator does not invent them. Symlinks ins
 a project may resolve outside it; this is lexical validation, not access control.
 
 Omitted approval configuration requires explicit authorization for commit, push,
-pull-request, deploy, publish, migration and external-write. An explicit empty set
-adds no toolkit approval requests, but cannot override project/host policy or grant
-permission. Response language applies to agent responses; executable status labels,
-diagnostics and machine-report keys remain English in version one.
+pull-request, deploy, publish, migration, external-write, outside-project access,
+artifact/package downloads, dependency changes and unplanned database work. Existing
+task or session authorization remains valid for its concrete scope and is not requested
+again. An explicit empty set adds no toolkit approval requests, but cannot override
+project/host policy or grant permission. Response language applies to agent responses;
+executable status labels, diagnostics and machine-report keys remain English in version
+one.
 
 ## Exact script invocations
 

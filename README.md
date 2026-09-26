@@ -7,8 +7,14 @@ copying its framework. It is not application runtime code.
 
 Projects retain their architecture, technology, design system, domain policy,
 check commands, budgets, approvals, task records and decisions. The toolkit supplies
-routing, four focused skills, five rule documents, project templates, a schema,
+routing, four focused skills, six rule documents, project templates, a schema,
 and three local scripts. No hooks, agents, command registry, indexer or plugin package.
+
+The shared authorization policy lets already-approved project-local implementation,
+tests, browser/simulator checks, project start/stop, and agreed local database work
+continue without repeated workflow prompts. It requires approval for project-external
+file access, artifact/package downloads, external uploads/writes, unapproved dependency
+changes, and unplanned database operations. Host sandbox prompts remain independent.
 
 ## Requirements
 

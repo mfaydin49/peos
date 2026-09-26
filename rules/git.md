@@ -2,7 +2,8 @@
 
 Preserve unrelated staged, unstaged, and untracked work. Inspect the selected diff
 before editing. Remove newly obsolete code only within scope; avoid broad cleanup.
-Destructive Git operations require explicit authorization. Follow project policy
+Apply [authorization](authorization.md) before commands with side effects. Destructive
+Git operations require explicit authorization. Follow project policy
 for commits, pushes, and pull requests; honor authorization already given for a
 concrete action without repeated requests. Implementation permission is not deployment
 permission. `approvalRequiredFor` is workflow guidance, never a host permission bypass;

@@ -48,5 +48,18 @@
       ],
       "required": true
     }
+  ],
+  "approvalRequiredFor": [
+    "commit",
+    "push",
+    "pull-request",
+    "deploy",
+    "publish",
+    "migration",
+    "external-write",
+    "outside-project",
+    "download",
+    "dependency-change",
+    "unplanned-database"
   ]
 }
