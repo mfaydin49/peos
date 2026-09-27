@@ -12,9 +12,11 @@ and three local scripts. No hooks, agents, command registry, indexer or plugin p
 
 The shared authorization policy lets already-approved project-local implementation,
 tests, browser/simulator checks, project start/stop, and agreed local database work
-continue without repeated workflow prompts. It requires approval for project-external
-file access, artifact/package downloads, external uploads/writes, unapproved dependency
-changes, and unplanned database operations. Host sandbox prompts remain independent.
+continue without repeated workflow prompts. Project-owned loopback ports are included;
+unrelated local ports and services are not. It requires approval for project-external
+file access, artifact/package downloads, external registry access, external
+uploads/writes, unapproved dependency changes, and unplanned database operations. Host
+sandbox prompts remain independent.
 
 ## Requirements
 

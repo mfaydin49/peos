@@ -10,6 +10,10 @@ Within the explicit consuming project, proceed without another workflow approval
 - starting, exercising, and stopping the project and project-local development services;
 - running and rerunning applicable unit, integration, contract, end-to-end, browser,
   accessibility, visual, simulator, emulator, build, lint, and type checks;
+- opening, listening on, and connecting to `localhost`, `127.0.0.0/8`, or `::1` ports
+  started, declared, or necessarily used by the project and agreed task, including
+  ephemeral ports for test servers, browsers, simulators, emulators, PostgreSQL,
+  Redis, queues, and other project-local development services;
 - fixing failures caused by the requested change and rerunning affected checks;
 - creating temporary fixtures, screenshots, build output, and test artifacts;
 - using dedicated local development or disposable test databases; and
@@ -25,6 +29,9 @@ Obtain explicit approval before:
 
 - accessing or changing files outside the project, except for the tool-managed runtime
   state above;
+- connecting to, inspecting, enumerating, scanning, changing, or stopping a local port,
+  process, database, socket, or service that is not owned by the project or established
+  as part of the agreed task;
 - downloading a file, package, binary, dependency, model, dataset, or other artifact;
 - uploading files or data, or otherwise writing to an external service;
 - adding, installing, upgrading, replacing, or removing a dependency, package, tool,
@@ -41,12 +48,23 @@ authorized local browser or simulator test are also covered when they target the
 agreed local/test environment and do not transmit user files, secrets, or unrelated
 data.
 
+Package-registry metadata, vulnerability feeds, remote audit endpoints, and similar
+external services are not loopback. Obtain one explicit approval before the first such
+access unless that exact external access was already approved for the task. Consolidate
+related checks and reuse the authorization; do not ask separately for each audit query
+or rerun. Registry access does not authorize installing, upgrading, or downloading a
+package.
+
 Before database work, establish the target environment and whether the data is
 disposable. A dedicated local test database is preferred. If identity, scope, or data
 ownership is unclear, stop before mutation and ask. An unexpected database need found
 during implementation is a scope change and requires approval even when it is local.
 
 When host enforcement still requires an approval prompt for authorized work, request
-the narrowest reusable permission that covers the remaining task. Explain that the
-prompt comes from the host boundary, not from missing workflow authorization. A host
-approval cannot expand the user's task or waive these rules.
+the narrowest reusable permission that covers the remaining task. Reuse the same
+configured check command or stable command prefix for reruns instead of producing new
+shell wrappers that trigger fresh approvals. Group related checks when that preserves
+their documented behavior and evidence. Explain that the operation is already
+authorized by the task and that the prompt comes only from the host boundary, not from
+missing workflow authorization. A host approval cannot expand the user's task or waive
+these rules.

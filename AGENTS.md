@@ -9,7 +9,8 @@ conflicts. Use `outputLanguage` for responses (default `tr`); toolkit files are 
 Always apply [authorization](rules/authorization.md). Work already authorized by the
 task or an accepted contract stays authorized: do not ask again for project-local
 implementation, running or stopping the project, applicable tests, browser/simulator
-checks, or agreed local database work. Ask before crossing the project boundary,
+checks, project-related loopback ports, or agreed local database work. Ask before
+accessing unrelated local ports or services, crossing the project boundary,
 downloading an artifact/package/dataset, uploading or otherwise writing externally,
 adding an unapproved dependency/tool/service, or performing database work that was
 not part of the agreed task. Host sandbox prompts may still be required and never
