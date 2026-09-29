@@ -10,6 +10,10 @@ Within the explicit consuming project, proceed without another workflow approval
 - starting, exercising, and stopping the project and project-local development services;
 - running and rerunning applicable unit, integration, contract, end-to-end, browser,
   accessibility, visual, simulator, emulator, build, lint, and type checks;
+- building, installing, updating, launching, stopping, debugging, and testing the
+  project's development app on a physical device already authorized for that app or
+  task, including reading project app logs and capturing task-relevant screenshots,
+  recordings, performance traces, and accessibility evidence;
 - opening, listening on, and connecting to `localhost`, `127.0.0.0/8`, or `::1` ports
   started, declared, or necessarily used by the project and agreed task, including
   ephemeral ports for test servers, browsers, simulators, emulators, PostgreSQL,
@@ -32,6 +36,10 @@ Obtain explicit approval before:
 - connecting to, inspecting, enumerating, scanning, changing, or stopping a local port,
   process, database, socket, or service that is not owned by the project or established
   as part of the agreed task;
+- pairing, trusting, or accessing a physical device for the first time when that device
+  and project app were not already authorized;
+- accessing unrelated apps, accounts, messages, photos, contacts, files, sensors, or
+  other personal device data, or changing device-wide settings outside the agreed test;
 - downloading a file, package, binary, dependency, model, dataset, or other artifact;
 - uploading files or data, or otherwise writing to an external service;
 - adding, installing, upgrading, replacing, or removing a dependency, package, tool,
@@ -54,6 +62,16 @@ access unless that exact external access was already approved for the task. Cons
 related checks and reuse the authorization; do not ask separately for each audit query
 or rerun. Registry access does not authorize installing, upgrading, or downloading a
 package.
+
+Physical-device authorization persists for the same project app and development
+workflow. Do not ask again for routine development builds, reinstalls, launches,
+reruns, logs, screenshots, recordings, performance traces, accessibility checks, or
+app-local disposable test data after the device/app access was authorized once. A new
+device, a different app, broader device data or permissions, device-wide configuration,
+production credentials/data, store distribution, beta distribution to other people,
+or a destructive device action requires explicit approval. OS trust, privacy, signing,
+or developer-mode prompts may still require the user to act on the device; explain
+that these are host/device requirements rather than renewed workflow approval.
 
 Before database work, establish the target environment and whether the data is
 disposable. A dedicated local test database is preferred. If identity, scope, or data

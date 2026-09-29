@@ -13,10 +13,12 @@ and three local scripts. No hooks, agents, command registry, indexer or plugin p
 The shared authorization policy lets already-approved project-local implementation,
 tests, browser/simulator checks, project start/stop, and agreed local database work
 continue without repeated workflow prompts. Project-owned loopback ports are included;
-unrelated local ports and services are not. It requires approval for project-external
-file access, artifact/package downloads, external registry access, external
-uploads/writes, unapproved dependency changes, and unplanned database operations. Host
-sandbox prompts remain independent.
+unrelated local ports and services are not. Once authorized, physical-device development
+for the same project app also continues without repeated prompts. It requires approval
+for project-external file access, artifact/package downloads, external registry access,
+external uploads/writes, unapproved dependency changes, unplanned database operations,
+new devices/apps, unrelated personal device data, and production/store distribution.
+Host sandbox and device trust prompts remain independent.
 
 ## Requirements
 
