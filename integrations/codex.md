@@ -98,7 +98,7 @@ schema/runtime agreement. No custom JSON Schema engine or undocumented keyword i
 | `projectName` | Required non-blank string |
 | `outputLanguage` | Optional non-blank response language; defaults to `tr` |
 | `references` | Optional `instructions`, `architecture`, `design` path arrays; defaults to `{}` |
-| `checks` | Non-empty list of `id`, `executable`, `args`, `phases`, `required`, `timeoutMs` |
+| `checks` | Non-empty list of `id`, `executable`, `args`, `phases`, `required`, `timeoutMs`, and optional `kind` (`test`, `lint`, `typecheck`, `build`, `security`, `performance`, `coverage`, `mutation`, `other`), echoed in verification results |
 | `manualChecks` | Optional list of `id`, `description`, `phases`, `required`; defaults to `[]` |
 | `approvalRequiredFor` | Optional action set; defaults to every action enumerated in the schema. Local task execution and verification follow `rules/authorization.md`. |
 
@@ -146,7 +146,7 @@ node /path/to/personal-engineering-os/scripts/check-changed-files.mjs --project 
 ```
 
 Options may occur once; positional arguments and unknown options are errors.
-`--reference` is valid only in reference mode. `--json` is available on all three
+`--reference` is valid only in reference mode. `--json` is available on all
 scripts and emits exactly one JSON object on stdout, including handled errors.
 There is no generic shell-command-string field or eval. Do not configure watch loops.
 
@@ -222,6 +222,57 @@ Categories `potentially-sensitive`, `migration`, `schema`, `dependency`, and `to
 are filename hints for further review. File contents are never printed. A lockfile-only
 change is not inherently wrong; categories are neither a secret scan nor evidence
 of migration safety or security.
+
+### Run state
+
+`scripts/peos-run.mjs` keeps the state of one gated run under
+`.project-os/runs/<YYYY-MM-DD-name>/` ([design §10](../docs/design/peos-v2-plugin.md#10-files)).
+The first argument is the action; options follow the same rules as the other scripts.
+
+```sh
+node /path/to/personal-engineering-os/scripts/peos-run.mjs init --project /path/to/project --name avatar-upload --type feature --tier standard
+node /path/to/personal-engineering-os/scripts/peos-run.mjs status --project /path/to/project [--run 2026-10-29-avatar-upload]
+node /path/to/personal-engineering-os/scripts/peos-run.mjs fingerprint --project /path/to/project
+node /path/to/personal-engineering-os/scripts/peos-run.mjs record-checks --project /path/to/project --run <run> --phase task [--checks '["tests"]']
+node /path/to/personal-engineering-os/scripts/peos-run.mjs record-eval --project /path/to/project --run <run> --report /tmp/report.json   # or --report - for stdin
+node /path/to/personal-engineering-os/scripts/peos-run.mjs approve|revise --project /path/to/project --run <run> --gate spec|architecture|plan
+node /path/to/personal-engineering-os/scripts/peos-run.mjs reset-eval --project /path/to/project --run <run> --key code-all
+node /path/to/personal-engineering-os/scripts/peos-run.mjs advance --project /path/to/project --run <run> --to <stage>
+node /path/to/personal-engineering-os/scripts/peos-run.mjs step --project /path/to/project --run <run> --step S1 --status done
+```
+
+- `--run` takes the dated run name or, when unique, the name alone (`AMBIGUOUS`
+  otherwise). `status --run` also returns the run `directory` and the current
+  `artifacts` hashes, which spec and plan evaluators use as their `subject`.
+- Only this script writes `state.json`, `checks.json` and `evals/`; writes are atomic
+  (fsync + rename) and serialized by `state.lock`. A leftover lock is reported, never
+  removed silently. Run files are refused when they are symlinks.
+- `fingerprint` hashes HEAD plus the working-tree content of every path that differs
+  from HEAD (staged, unstaged, untracked, assume-unchanged, skip-worktree), excluding
+  gitignored files and `.project-os/runs/`. Index-only differences with identical
+  working-tree content do not change it. A changed submodule or untracked nested
+  repository fails with `FINGERPRINT` because its contents cannot be covered;
+  `status` then still reports gates, with `codeState: null` and the reason.
+- `record-checks` runs `verify` and binds its report to the fingerprint only if the
+  fingerprint is unchanged after the checks; otherwise `codeState` is `null`.
+- `record-eval` validates an evaluator report against
+  [the eval schema](../schemas/eval-report.schema.json), rejects it when its `subject`
+  is not the current artifact hash (spec/plan) or fingerprint (code), and caps
+  consecutive non-PASS rounds at three; the third failed round returns
+  `limitReached: true`. `reset-eval` clears one key after the human decides to continue.
+- `approve` requires earlier gates to be fresh and a fresh PASS evaluation of the
+  gate's artifact. An approval goes stale when its artifact or an earlier approved
+  artifact changes; a new approval reopens every later gate. `revise` reopens the gate
+  and every later gate, and is refused on a finished run.
+- `advance` to a gated stage (`architecture`, `plan`) requires every earlier tier gate
+  fresh; to `implement`/`verify`/`evaluate` all tier gates fresh; to
+  `release` additionally a full PASS `checks.json` (either phase) and PASS code
+  evaluations (at least one `code-*`; `large` needs the acceptance, quality and tests
+  foci), all for the current fingerprint; to `done` the same with release-phase checks.
+- `approve`, `revise` and `reset-eval` are not yet protected from being invoked by a
+  model (`revise` also restarts evaluation rounds): per the design they must sit
+  behind a project `permissions.ask` rule and the plugin hooks (increment 4). Until
+  then they are workflow guidance, not enforcement.
 
 ## What is enforced and what is guided
 

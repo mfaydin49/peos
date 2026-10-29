@@ -1,0 +1,14 @@
+{
+  "name": "peos",
+  "version": "0.2.0",
+  "description": "Personal Engineering OS: gated, evidence-based pipeline from idea to release-ready change, with independent evaluators.",
+  "author": {
+    "name": "mfaydin49"
+  },
+  "keywords": [
+    "workflow",
+    "planning",
+    "evaluation",
+    "gates"
+  ]
+}

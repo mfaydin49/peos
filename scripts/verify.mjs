@@ -28,9 +28,9 @@ await main(async () => {
     for (const check of config.checks) {
       const inPhase = check.phases.includes(options.phase);
       if (!inPhase || !selected.includes(check.id)) {
-        results.push({ id: check.id, required: check.required, status: 'SKIPPED', exitCode: null, durationMs: 0,
+        results.push({ id: check.id, required: check.required, kind: check.kind ?? null, status: 'SKIPPED', exitCode: null, durationMs: 0,
           reason: inPhase ? 'Intentionally omitted from targeted verification.' : 'Outside selected phase.' });
-      } else results.push(await runCheck(check, project, controller.signal));
+      } else results.push({ kind: check.kind ?? null, ...await runCheck(check, project, controller.signal) });
     }
   } finally { process.off('SIGINT', onInt); process.off('SIGTERM', onTerm); }
   const failed = results.some(check => selected.includes(check.id) && check.required && check.status !== 'PASS');

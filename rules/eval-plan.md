@@ -1,0 +1,21 @@
+# Plan evaluation rubric
+
+Input: the approved `spec.md`, `plan.md`, and the project files the plan names.
+
+Blocking (`high` or `critical`):
+
+- An acceptance criterion is covered by no step.
+- A step has no test, or its test would not demonstrate its criteria.
+- Dependency order is wrong: a step needs work from a later step.
+- Steps marked parallel touch overlapping files.
+- A step introduces a dependency, service, migration or public API the spec or an
+  approved decision does not cover.
+- The plan contradicts the spec, a non-goal, or existing project contracts it names.
+- A named file, module or API does not exist and the plan does not create it.
+
+Non-blocking (`medium` or `low`): a step that could be merged or removed, an
+abstraction without an established need, a risk without mitigation.
+
+Verify claims about the codebase by reading the referenced files; do not assume.
+Use `criteria` to report, for each `AC-n`, `met` when a step covers it with a test,
+otherwise `not_met`, with the covering step IDs as evidence.

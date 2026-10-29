@@ -1,0 +1,16 @@
+{
+  "name": "peos-local",
+  "owner": {
+    "name": "mfaydin49"
+  },
+  "metadata": {
+    "description": "Local marketplace for the Personal Engineering OS plugin."
+  },
+  "plugins": [
+    {
+      "name": "peos",
+      "source": "./",
+      "description": "Personal Engineering OS: gated, evidence-based pipeline from idea to release-ready change."
+    }
+  ]
+}

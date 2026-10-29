@@ -182,6 +182,19 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 2147483647
+        },
+        "kind": {
+          "enum": [
+            "test",
+            "lint",
+            "typecheck",
+            "build",
+            "security",
+            "performance",
+            "coverage",
+            "mutation",
+            "other"
+          ]
         }
       }
     },

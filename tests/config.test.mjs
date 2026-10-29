@@ -38,6 +38,8 @@ const invalidCases = [
   ['empty phases', c => ({ ...c, checks: [check('x', '', { phases: [] })] })],
   ['duplicate phases', c => ({ ...c, checks: [check('x', '', { phases: ['task', 'task'] })] })],
   ['identical check', c => ({ ...c, checks: [check(), check()] })],
+  ['unknown check kind', c => ({ ...c, checks: [check('x', '', { kind: 'smoke' })] })],
+  ['null check kind', c => ({ ...c, checks: [check('x', '', { kind: null })] })],
   ['null manual array', c => ({ ...c, manualChecks: null })],
   ['unknown manual field', c => ({ ...c, manualChecks: [{ id: 'm', description: 'manual', phases: ['release'], required: true, extra: 1 }] })],
   ['missing manual description', c => ({ ...c, manualChecks: [{ id: 'm', phases: ['release'], required: true }] })],
@@ -52,7 +54,7 @@ for (const [label, mutate] of invalidCases) test(`schema/runtime reject ${label}
 });
 test('valid fixtures, example and defaults agree without mutating input', async () => {
   const example = JSON.parse(await readFile(resolve(toolkit, 'templates/engineering.config.json')));
-  const fixtures = [config(), example, { ...config([check('has,comma', '', { args: ['', 'repeat', 'repeat'] })]), outputLanguage: 'en', references: { design: ['docs/My Design.md'] }, approvalRequiredFor: [] }];
+  const fixtures = [config(), example, { ...config([check('has,comma', '', { args: ['', 'repeat', 'repeat'] })]), outputLanguage: 'en', references: { design: ['docs/My Design.md'] }, approvalRequiredFor: [] }, config([check('scan', '', { kind: 'security' })])];
   for (const input of fixtures) {
     const original = structuredClone(input);
     assert.equal(validateSchema(input), true, JSON.stringify(validateSchema.errors));

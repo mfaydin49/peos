@@ -7,8 +7,10 @@ copying its framework. It is not application runtime code.
 
 Projects retain their architecture, technology, design system, domain policy,
 check commands, budgets, approvals, task records and decisions. The toolkit supplies
-routing, four focused skills, six rule documents, project templates, a schema,
-and three local scripts. No hooks, agents, command registry, indexer or plugin package.
+routing, four focused stage skills, rule documents, project and run templates, schemas,
+and four local scripts. It is also a Claude Code plugin preview (below) with entry
+skills and four spec/plan agents; there are no hooks yet. The direction is specified in
+the [v2 design](docs/design/peos-v2-plugin.md); increments 1–3 are implemented.
 
 The shared authorization policy lets already-approved project-local implementation,
 tests, browser/simulator checks, project start/stop, and agreed local database work
@@ -19,6 +21,20 @@ for project-external file access, artifact/package downloads, external registry 
 external uploads/writes, unapproved dependency changes, unplanned database operations,
 new devices/apps, unrelated personal device data, and production/store distribution.
 Host sandbox and device trust prompts remain independent.
+
+## Claude Code plugin (preview)
+
+This directory is also a Claude Code plugin (`peos`) and a local marketplace. It adds
+`/peos:start`, `/peos:continue`, `/peos:status`, `/peos:approve` and `/peos:revise`,
+which drive a run through spec and plan with independent evaluators and human gates.
+Implementation, checks and code evaluation are automated in later increments; see the
+[v2 design](docs/design/peos-v2-plugin.md). Try it for one session without installing:
+
+```sh
+claude --plugin-dir /path/to/personal-engineering-os
+```
+
+Gate approval is not yet host-enforced (design increment 4).
 
 ## Requirements
 

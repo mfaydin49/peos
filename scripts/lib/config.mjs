@@ -15,6 +15,8 @@ export const approvals = [
   'dependency-change',
   'unplanned-database'
 ];
+// Lets gates ask mechanically whether, e.g., a security check ran on a code state.
+export const checkKinds = ['test', 'lint', 'typecheck', 'build', 'security', 'performance', 'coverage', 'mutation', 'other'];
 // Portable slash-separated paths, contained lexically within the target project.
 export const referencePattern = '^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:\\u0000-\\u001f]+$';
 const pathPattern = new RegExp(referencePattern);
@@ -58,7 +60,7 @@ export function validateConfig(input) {
     for (const [index, entry] of entries.entries()) {
       const where = `${kind}[${index}]`;
       const fields = kind === 'checks' ? ['id', 'executable', 'args', 'phases', 'required', 'timeoutMs'] : ['id', 'description', 'phases', 'required'];
-      object(entry, fields, fields, where);
+      object(entry, kind === 'checks' ? [...fields, 'kind'] : fields, fields, where);
       string(entry.id, `${where}.id`);
       if (ids.has(entry.id)) invalid(where, 'duplicate ID (IDs must be unique across automated and manual checks)');
       ids.add(entry.id);
@@ -69,6 +71,7 @@ export function validateConfig(input) {
         if (entry.executable.includes('\0')) invalid(where, 'executable must not contain NUL');
         if (!Array.isArray(entry.args) || entry.args.some(arg => typeof arg !== 'string' || arg.includes('\0'))) invalid(where, 'args must be strings without NUL');
         if (!Number.isSafeInteger(entry.timeoutMs) || entry.timeoutMs <= 0 || entry.timeoutMs > 2147483647) invalid(where, 'timeoutMs must be an integer from 1 to 2147483647');
+        if (Object.hasOwn(entry, 'kind') && !checkKinds.includes(entry.kind)) invalid(`${where}.kind`, 'unsupported value');
       } else string(entry.description, `${where}.description`);
     }
   }

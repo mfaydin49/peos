@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/personal-engineering-os/state.schema.json",
+  "title": "Personal Engineering OS run state",
+  "$comment": "Written only by scripts/peos-run.mjs. Agents never write this file.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "run", "type", "tier", "stage", "gates", "steps", "evals", "checkpoints", "createdAt", "updatedAt"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "run": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength": 80 },
+    "type": { "enum": ["app", "feature", "change", "fix", "refactor"] },
+    "tier": { "enum": ["trivial", "small", "standard", "large"] },
+    "stage": { "enum": ["intake", "spec", "architecture", "plan", "implement", "verify", "evaluate", "release", "done", "stopped"] },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "spec": { "$ref": "#/$defs/gate" },
+        "architecture": { "$ref": "#/$defs/gate" },
+        "plan": { "$ref": "#/$defs/gate" }
+      }
+    },
+    "steps": {
+      "type": "object",
+      "propertyNames": { "pattern": "^S[1-9][0-9]*$" },
+      "additionalProperties": { "enum": ["pending", "in_progress", "done", "reverted"] }
+    },
+    "evals": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z]+(?:-[a-z0-9]+)*$" },
+      "additionalProperties": { "$ref": "#/$defs/evalSummary" }
+    },
+    "checkpoints": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$" }
+    },
+    "createdAt": { "$ref": "#/$defs/timestamp" },
+    "updatedAt": { "$ref": "#/$defs/timestamp" }
+  },
+  "$defs": {
+    "timestamp": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$" },
+    "artifactHash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "subject": { "type": "string", "pattern": "^(?:fp|sha256):[0-9a-f]{64}$" },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": { "enum": ["pending", "approved", "revision_requested"] },
+        "by": { "const": "human" },
+        "artifactHash": { "$ref": "#/$defs/artifactHash" },
+        "at": { "$ref": "#/$defs/timestamp" }
+      },
+      "if": { "properties": { "status": { "const": "approved" } } },
+      "then": { "properties": { "by": true, "artifactHash": true, "at": true }, "required": ["by", "artifactHash", "at"] }
+    },
+    "evalSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verdict", "round", "subject"],
+      "properties": {
+        "verdict": { "enum": ["PASS", "FAIL", "BLOCKED"] },
+        "round": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "subject": { "$ref": "#/$defs/subject" }
+      }
+    }
+  }
+}

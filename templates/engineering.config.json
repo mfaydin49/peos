@@ -23,7 +23,8 @@
         "release"
       ],
       "required": true,
-      "timeoutMs": 120000
+      "timeoutMs": 120000,
+      "kind": "test"
     },
     {
       "id": "build",
@@ -36,7 +37,8 @@
         "release"
       ],
       "required": true,
-      "timeoutMs": 120000
+      "timeoutMs": 120000,
+      "kind": "build"
     }
   ],
   "manualChecks": [

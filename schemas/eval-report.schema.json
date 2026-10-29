@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/personal-engineering-os/eval-report.schema.json",
+  "title": "Personal Engineering OS evaluator report",
+  "$comment": "Returned by an evaluator agent as its final message and persisted by the orchestrator. Spec and plan evaluations judge an artifact (sha256); code, security and performance evaluations judge a code state (fp).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "evaluator", "verdict", "mode", "subject", "criteria", "findings", "notAssessed"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "const": 1 },
+    "evaluator": { "enum": ["spec", "plan", "code", "security", "performance"] },
+    "focus": { "enum": ["architecture", "acceptance", "quality", "tests", "all"] },
+    "verdict": { "enum": ["PASS", "FAIL", "BLOCKED"] },
+    "mode": { "enum": ["full", "degraded"] },
+    "subject": { "type": "string", "pattern": "^(?:fp|sha256):[0-9a-f]{64}$" },
+    "criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status", "evidence"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^AC-[1-9][0-9]*$" },
+          "status": { "enum": ["met", "not_met", "not_assessed"] },
+          "evidence": { "type": "string", "pattern": "\\S", "maxLength": 500 }
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "severity", "problem", "impact", "fix"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^F[1-9][0-9]*$" },
+          "severity": { "enum": ["critical", "high", "medium", "low"] },
+          "file": { "type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:\\u0000-\\u001f]+$" },
+          "line": { "type": "integer", "minimum": 1 },
+          "problem": { "type": "string", "pattern": "\\S", "maxLength": 500 },
+          "impact": { "type": "string", "pattern": "\\S", "maxLength": 500 },
+          "fix": { "type": "string", "pattern": "\\S", "maxLength": 500 }
+        }
+      }
+    },
+    "notAssessed": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "\\S", "maxLength": 300 }
+    }
+  },
+  "allOf": [
+    {
+      "$comment": "Spec and plan judge artifacts; the others judge code states.",
+      "if": { "properties": { "evaluator": { "enum": ["spec", "plan"] } } },
+      "then": { "properties": { "subject": { "type": "string", "pattern": "^sha256:" } } },
+      "else": { "properties": { "subject": { "type": "string", "pattern": "^fp:" } } }
+    },
+    {
+      "if": { "properties": { "evaluator": { "const": "code" } } },
+      "then": { "required": ["focus"], "properties": { "focus": { "enum": ["acceptance", "quality", "tests", "all"] } } }
+    },
+    {
+      "if": { "properties": { "evaluator": { "const": "plan" } } },
+      "then": { "properties": { "focus": { "const": "architecture" } } }
+    },
+    {
+      "if": { "properties": { "evaluator": { "enum": ["spec", "security", "performance"] } } },
+      "then": { "not": { "properties": { "focus": true }, "required": ["focus"] } }
+    },
+    {
+      "$comment": "PASS means no blocking finding and no unmet criterion.",
+      "if": { "properties": { "verdict": { "const": "PASS" } } },
+      "then": {
+        "properties": {
+          "findings": { "type": "array", "not": { "type": "array", "contains": { "type": "object", "properties": { "severity": { "enum": ["critical", "high"] } } } } },
+          "criteria": { "type": "array", "not": { "type": "array", "contains": { "type": "object", "properties": { "status": { "const": "not_met" } } } } }
+        }
+      }
+    },
+    {
+      "$comment": "A degraded evaluation must say what it could not assess.",
+      "if": { "properties": { "mode": { "const": "degraded" } } },
+      "then": { "properties": { "notAssessed": { "type": "array", "minItems": 1 } } }
+    }
+  ]
+}
