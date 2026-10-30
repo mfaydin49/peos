@@ -10,5 +10,6 @@ Run, read-only:
 
 Run (dated or short name, optional): $ARGUMENTS
 
-Summarize briefly: stage, each gate (pending, approved, stale), each evaluation
-(verdict, round, stale), recorded checks, and the next action. Change nothing.
+Summarize in a few short lines: stage, each gate (pending, approved, stale), each
+evaluation (verdict, round, stale), recorded checks, token usage against the tier
+budget when `usage` is present, and the next action. Change nothing.

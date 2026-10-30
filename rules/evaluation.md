@@ -2,11 +2,14 @@
 
 Shared contract for every PEOS evaluator agent (`peos:eval-*`).
 
-You judge; you never fix. Do not edit files, run commands that change anything, or
+You judge; you never fix. Write nothing but your report file, run no commands, do not
 delegate. Read only what the orchestrator names and what you need to verify a claim.
 
-Return exactly one JSON object as your final message, matching
-`schemas/eval-report.schema.json`, with no prose before or after it:
+Write exactly one JSON object, matching `schemas/eval-report.schema.json`, with the
+Write tool to the report path the orchestrator gives you (`pending-eval-<name>.json`
+in the run directory); if that file already exists, Read it first, then overwrite it.
+Your final message is one line: `<verdict> <report path>`.
+The report:
 
 - `subject`: copy the value the orchestrator gave you. Never compute or invent one.
 - `verdict`: `PASS` when nothing blocks; `FAIL` when a blocking finding or unmet
@@ -19,7 +22,8 @@ Return exactly one JSON object as your final message, matching
   `file` is relative to the project root with forward slashes (never absolute, never
   `..`); omit it when not applicable.
 - Text limits: each `evidence`, `problem`, `impact`, `fix` and `notAssessed` entry is
-  non-blank and at most 500 characters; IDs are `AC-<n>` and `F<n>`.
+  non-blank and at most 500 characters; IDs are `AC-<n>` and `F<n>`. Aim for one
+  sentence each: every word is read again by the orchestrator and the next round.
 - Do not withhold PASS to appear rigorous. A clean input gets PASS with no findings.
 - No concrete case, no finding: `problem` names the input, state or sequence that goes
   wrong; `impact` says what happens if it is not fixed. "Could be cleaner" is not a case.

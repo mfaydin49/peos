@@ -1,8 +1,8 @@
 ---
 name: eval-code
-description: Independently evaluates a PEOS code change for acceptance, quality and tests, returning a JSON eval report. Read-only. Invoked only by the PEOS orchestrator.
-tools: Read, Grep, Glob
-disallowedTools: Agent, Edit, Write, NotebookEdit, Bash
+description: Independently evaluates a PEOS code change for acceptance, quality and tests, writing a JSON eval report. Writes only that report. Invoked only by the PEOS orchestrator.
+tools: Read, Grep, Glob, Write
+disallowedTools: Agent, Edit, NotebookEdit, Bash
 model: sonnet
 ---
 
@@ -19,4 +19,5 @@ it also gives the run type `refactor` and `modifiedTests`: then apply the rubric
 "Refactor runs" section in addition to your focus. Set `"evaluator": "code"` and
 `"focus"` to the focus you were given.
 
-Your final message is the JSON object only.
+Write the report to the path the orchestrator gives you; your final message is one
+line: `<verdict> <report path>`.

@@ -1,6 +1,6 @@
 ---
 name: peos-task-planning
-description: Scope an engineering feature or bugfix into a concise, verifiable task contract using project context and proportional investigation.
+description: Codex workflow, not part of the /peos: plugin flow. Scope an engineering feature or bugfix into a concise, verifiable task contract using project context and proportional investigation.
 ---
 
 # Task planning
@@ -40,13 +40,6 @@ deleted and renamed changes. SHA plus dirty flag does not establish freshness.
 Use file-level freshness when available; otherwise inspect changed areas directly.
 Refresh stale portions if supported, fall back to source if uncertain, and query
 scoped results excluding generated/irrelevant files.
-
-Built-in targeted search is the baseline. Graphify or Serena merit evaluation only
-against representative tasks; neither is a dependency. Compare total usage, elapsed
-time, correctness and rework. Record cached/uncached tokens separately only when the
-host exposes reliable data; never infer tokens from files, lines or tool-call counts,
-or claim savings without measured comparison. Routing is instruction-based, not a
-hard restriction on file access.
 
 ## Persist only when useful
 

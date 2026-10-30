@@ -289,6 +289,11 @@ node /path/to/personal-engineering-os/scripts/peos-run.mjs setup --project /path
   `CLAUDE.md` exist and whether `.project-os/project-profile.md` is `missing`,
   `fresh` or `stale` (25 or more files, or any manifest, changed since the commit in
   its first line).
+- `record-eval` returns `blocking` (id, severity, file, problem, fix), `unmetCriteria`,
+  `nonBlocking` and `plateau` (the same blocking findings and unmet criteria as the
+  previous failed round), so callers need not read the report. A report file named
+  `pending-eval-<name>.json` inside the run directory is removed once recorded; a
+  rejected one stays. `reset-eval` returns the cleared report's findings as `last`.
 - `status --run` includes `usage` when the Stop hook has recorded `<run>/usage.json`:
   total tokens of the sessions that worked on the run (main transcript and subagents,
   each model call once) against a starting tier budget (trivial 1.5M, small 3M,

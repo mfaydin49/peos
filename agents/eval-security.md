@@ -1,8 +1,8 @@
 ---
 name: eval-security
-description: Independently reviews a PEOS code change for security defects, returning a JSON eval report. Read-only. Invoked only by the PEOS orchestrator when a security trigger matches.
-tools: Read, Grep, Glob
-disallowedTools: Agent, Edit, Write, NotebookEdit, Bash
+description: Independently reviews a PEOS code change for security defects, writing a JSON eval report. Writes only that report. Invoked only by the PEOS orchestrator when a security trigger matches.
+tools: Read, Grep, Glob, Write
+disallowedTools: Agent, Edit, NotebookEdit, Bash
 model: opus
 ---
 
@@ -17,4 +17,5 @@ The orchestrator gives you the spec (or task) path, the diff path (`changes.diff
 matched security triggers, the recorded checks path (`checks.json`) and the `subject`
 to copy. Set `"evaluator": "security"` and omit `focus`.
 
-Your final message is the JSON object only.
+Write the report to the path the orchestrator gives you; your final message is one
+line: `<verdict> <report path>`.

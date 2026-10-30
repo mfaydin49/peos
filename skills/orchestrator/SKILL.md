@@ -46,18 +46,31 @@ agents produce and judge. Design reference: ${CLAUDE_PLUGIN_ROOT}/docs/design/pe
 - Never read secret files (`.env*`, key and credential files, files named in
   `.gitignore` as local secrets), not even to list variable names. To learn which
   database or service a configuration targets, ask the user.
-- Give each agent paths and the minimum context, never the whole conversation. Give
-  every agent the project profile path (`.project-os/project-profile.md`) when it
-  exists, so it starts from it instead of exploring the project.
+- Give each agent paths and the minimum context, never the whole conversation or file
+  contents: a prompt of about 15 lines naming the inputs, the output path and what is
+  new this round. Give every agent the project profile path
+  (`.project-os/project-profile.md`) when it exists, so it starts from it instead of
+  exploring the project.
+- Keep every message short and plain; output costs most per token and stays in context.
+  While working, at most one line per step ("Spec yazılıyor."). At a gate or the end of
+  a turn, at most about eight lines: the decision or result, what is left, the next
+  command. Point to artifact paths instead of repeating their content; never paste
+  agent reports, JSON or diffs.
   Give evaluators the inputs their rubric names and the `subject` (`artifacts.<gate>`
   from `status` for spec and plan, `codeState` from `changes` for code); never pass
   your own opinion of the work.
-- Recording an evaluation: write the evaluator's JSON unchanged to
-  `<directory>/pending-eval.json` with the Write tool (hosts may refuse JSON in shell
-  heredocs), then `peos-run record-eval --run <run> --report <directory>/pending-eval.json`.
-  If `record-eval` rejects the JSON, spawn the same evaluator again (a new agent
-  call, not a message) with the same inputs plus the validation error, once, and wait
-  for its result. Record several evaluations one after another.
+- Producers and evaluators write their own output, so you never copy it: give the
+  producer its artifact path (`<directory>/spec.md`, `<directory>/plan.md`) and each
+  evaluator its report path `<directory>/pending-eval-<name>.json`, where `<name>` is
+  the evaluator's own (`spec`, `plan`, `code`, `security`; `code-<focus>` for a focused
+  code evaluation). Record a report with
+  `peos-run record-eval --run <run> --report <directory>/pending-eval-<name>.json`; it
+  consumes the file once recorded and returns what you need: `verdict`, `round`,
+  `limitReached`, `plateau`, the `blocking` findings (problem and fix), `unmetCriteria`
+  and the `nonBlocking` count. Pass `blocking` on to the producer or implementer; do not
+  read the report. If the file is missing or `record-eval` rejects it, spawn the same
+  evaluator again (a new agent call, not a message) with the same inputs plus the
+  error, once. Record several evaluations one after another.
 - Apply `${CLAUDE_PLUGIN_ROOT}/rules/authorization.md`. Reply in the configuration's
   `outputLanguage` (default `tr`). Name the project's instruction files to the agents
   rather than reading them in full yourself.
@@ -77,16 +90,12 @@ Run before every new run (it is fast when nothing is missing) and for `/peos:ini
    fails with `SETUP` (no test command detected), tell the user the reason and stop.
 2. If the profile is `missing` or `stale`, or this is `/peos:init`: spawn
    `peos:profiler` with the project root, `${CLAUDE_PLUGIN_ROOT}/templates/project-profile.md`,
-   the configured checks, the commit `profile.head`, the existing profile when there is
-   one, and, when `AGENTS.md` is `missing`, a request to draft it from
-   `${CLAUDE_PLUGIN_ROOT}/templates/project-agents.md`. Write its
-   `project-profile.md` part to `.project-os/project-profile.md` with the Write tool,
-   starting with the `<!-- peos-profile head=… -->` line, without code fences.
-3. When `AGENTS.md` was `missing`, write the drafted part to `AGENTS.md` at the project
-   root, and if `CLAUDE.md` is also `missing`, write `CLAUDE.md` containing the single
-   line `@AGENTS.md` so that Claude Code loads it. Never overwrite an existing
-   `AGENTS.md` or `CLAUDE.md`. Tell the user which files you created; they are left
-   uncommitted for the user to review.
+   the configured checks, the commit `profile.head`, whether a profile exists, and,
+   when `AGENTS.md` is `missing`, a request to write it from
+   `${CLAUDE_PLUGIN_ROOT}/templates/project-agents.md`, plus `CLAUDE.md` when that is
+   also `missing`. The plugin lets it create those two only when they do not exist.
+3. Tell the user in one line which files were created; they stay uncommitted for the
+   user to review.
 
 ## 1. Intake (new run)
 
@@ -116,10 +125,9 @@ A new application is `app` and always `large`.
 Types: `app`, `feature`, `change` (update behavior and its tests), `fix` (reproduce
 with a failing test first), `refactor` (no behavior change, tests green throughout).
 
-Version 0.3 supports `trivial`, `small` and `standard` from request to the release
-stage. For a
-`large` `feature`, `change`, `fix` or `refactor`, say that the architecture stage
-arrives in a later increment and ask whether to proceed as `standard` or stop. A new
+The `trivial`, `small` and `standard` tiers run from request to the release stage. For
+a `large` `feature`, `change`, `fix` or `refactor`, say that the architecture stage
+arrives in increment 7 and ask whether to proceed as `standard` or stop. A new
 application (`app`) cannot be downgraded: stop, or let the user restate it as a
 `feature` of an existing project.
 
@@ -157,18 +165,19 @@ For each gated stage, in order `spec`, then `plan`:
    answer the user has already given. On `STATUS: QUESTIONS`, drop the questions the
    project or the evidence answers, ask the rest in one round (see Fixed rules), then
    spawn the producer again with all answers.
-3. On `STATUS: DRAFT`, write everything after the `STATUS: DRAFT` line (without a
-   surrounding code fence, if any) to `<directory>/<artifact>`, otherwise unchanged.
-4. `peos-run status --run <run>` and take `artifacts.<stage>` as the subject.
+3. On `STATUS: DRAFT`, the producer has written `<directory>/<artifact>`; keep its
+   summary lines for step 7 and do not read the artifact yourself.
+4. `peos-run status --run <run>` and take `artifacts.<stage>` as the subject (missing:
+   the producer did not write it; spawn it again once).
 5. Spawn the evaluator and record its report (see Fixed rules).
 6. `FAIL`: spawn the producer again with the findings; repeat from 3. Stop and ask the
-   user when `record-eval` returns `limitReached: true` (third failed round) or when
-   the same blocking findings appear two rounds in a row (plateau). Show the remaining
+   user when `record-eval` returns `limitReached: true` (third failed round) or
+   `plateau: true` (the same blocking findings two rounds in a row). Show the remaining
    blocking findings and the user's options: `/peos:revise <stage> <feedback>` to
    redirect the work, `/peos:retry <key>` to try again as is, or stop.
    `BLOCKED`: report what the evaluator could not assess and ask the user.
-7. `PASS`: show the user a short summary (goal, acceptance criteria, remaining
-   non-blocking findings) and the artifact path, then end your turn with:
+7. `PASS`: show the user the producer's summary lines, the count of remaining
+   non-blocking findings and the artifact path, then end your turn with:
    approve with `/peos:approve <stage>`, or request changes with
    `/peos:revise <stage> <feedback>`.
 
@@ -199,8 +208,8 @@ approved plan is the user's consent to implement it.
 ## 5. Verify
 
 1. `peos-run advance --to verify`, then `peos-run record-checks --run <run> --phase task`.
-   Without `.project-os/engineering.config.json` (`CONFIG_MISSING`), stop and ask the
-   user to configure the project's checks; do not invent commands.
+   On `CONFIG_MISSING`, run section 0 and record again; never write check commands
+   yourself.
 2. On `FAIL` or `BLOCKED`, spawn `peos:implementer` with the failing check IDs and their
    commands (logs are suppressed; it reruns them itself), then record checks again. After
    three failed attempts, stop and show the user which checks still fail.
@@ -219,9 +228,10 @@ approved plan is the user's consent to implement it.
    report.
 3. If any is `FAIL`: spawn `peos:implementer` with all blocking findings, then return to
    section 5. The code state changes, so every code evaluation recorded so far runs
-   again on the new state, plus any newly triggered one. Stop with the step-6 options of section 3 on `limitReached`
-   (`/peos:retry <key>`, e.g. `code-all` or `security`) or on a plateau. `BLOCKED`:
-   report what could not be assessed and ask the user.
+   again on the new state, plus any newly triggered one. Stop with the step-6 options
+   of section 3 on `limitReached` (`/peos:retry <key>`, e.g. `code-all` or
+   `security`) or on a plateau. `BLOCKED`: report what could not be assessed and ask
+   the user.
 
 ## 7. Release stage
 
@@ -229,7 +239,9 @@ approved plan is the user's consent to implement it.
    recorded code evaluation PASS on the current code state with the configuration the
    run started with; report a refusal as is.
 2. Write `<directory>/summary.md` from `${CLAUDE_PLUGIN_ROOT}/templates/run/summary.md`:
-   what changed, the acceptance evidence from the code evaluation's `criteria`, checks,
+   what changed, the acceptance evidence from the code evaluation's `criteria` (read
+   `<directory>/evals/code-all.json` with the Read tool; this is the one report you
+   read), checks,
    evaluations with rounds and remaining non-blocking findings, the `shortcuts` with
    their upgrade triggers, accepted floor flags with their reason, and what was not
    verified. Leave the readiness section as "Not assessed: release check arrives in
@@ -239,20 +251,19 @@ approved plan is the user's consent to implement it.
 
 ## 8. Resume
 
-Read `peos-run status --run <run>`. First, if a stage's evaluation is non-PASS at
-`round` 3, the round limit was reached: show its blocking findings and the step-6
-options, and stop. Otherwise continue from
-the first unmet condition:
-a pending or revision-requested gate without a fresh PASS evaluation → section 3 for
-that stage (use the user's feedback on revision); a fresh PASS evaluation awaiting
-approval → remind the user of the approve/revise commands; stage `implement` with steps
-not `done` → section 4 (run its step 1 first; it is safe to repeat and binds older
-runs) from the first unfinished step; stage `verify` → section 5;
-stage `evaluate` → section 6 (stale evaluations run again); a refactor without a
-baseline (`status` says so) → record it if no step has changed code yet, otherwise the
-`BASELINE` instruction of section 4.1; stage `release` → report
-the summary. A stale approval (artifact changed after approval) needs a new evaluation
-and approval; explain which artifact changed.
+Read `peos-run status --run <run>` and act on the first row that applies:
+
+| Condition | Action |
+| --- | --- |
+| An evaluation is non-PASS at round 3 | Show its blocking findings and the options of section 3 step 6; stop. |
+| A gate's approval is stale (artifact changed after approval) | Say which artifact changed; it needs a new evaluation and approval (section 3). |
+| A gate is pending or revision-requested without a fresh PASS evaluation | Section 3 for that stage, with the user's feedback on a revision. |
+| A gate has a fresh PASS evaluation awaiting approval | Remind the user of `/peos:approve <gate>` and `/peos:revise <gate> …`. |
+| A refactor has no baseline (`status` says so) | Record it if no step changed code yet; otherwise the `BASELINE` instruction of section 4.1. |
+| Stage `implement` with steps not `done` | Section 4: its step 1 first (safe to repeat; binds older runs), then from the first unfinished step. |
+| Stage `verify` | Section 5. |
+| Stage `evaluate` | Section 6 (stale evaluations run again). |
+| Stage `release` | Report the summary path. |
 
 ## Final report
 

@@ -3,8 +3,10 @@
 //   pending-eval.json; everything else there belongs to peos-run.
 // - Shell commands that touch .project-os (by text or working directory) are allowed
 //   only as a plain call of this plugin's own peos-run, and never its `grant` action.
-// - PEOS agents never write files or run commands, except the implementer, which may
-//   change project code but not .project-os or run peos-run.
+// - PEOS agents run no commands and write only their own output file (a producer its
+//   artifact, an evaluator its report, the profiler the profile and missing instruction
+//   files), so the orchestrator never copies their content; the implementer may change
+//   project code but not .project-os or run peos-run.
 // Shell inspection is a heuristic, not a sandbox: indirection (a script that builds the
 // path itself) can evade it, which is why decisions also need a user-created grant.
 import { lstat, realpath } from 'node:fs/promises';
@@ -14,6 +16,9 @@ import { readInput, projectRoot, emit } from './common.mjs';
 
 const peosRun = fileURLToPath(new URL('../scripts/peos-run.mjs', import.meta.url));
 const writableArtifacts = ['task.md', 'idea.md', 'spec.md', 'architecture.md', 'plan.md', 'summary.md', 'pending-eval.json'];
+const pendingReport = /^pending-eval-[a-z0-9-]+\.json$/;
+// The one run file each producer or evaluator may write.
+const agentRunFile = { 'peos:spec-writer': name => name === 'spec.md', 'peos:planner': name => name === 'plan.md' };
 const writeTools = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
 const peosAgents = /^peos:(?:eval-[a-z-]+|spec-writer|planner|investigator|profiler)$/;
 // Names only PEOS run state uses, matched in any directory and case. A project with its
@@ -36,10 +41,26 @@ function within(root, path) {
   const inside = relative(root, path);
   return inside === '' || (!inside.startsWith('..') && !isAbsolute(inside)) ? (inside ? inside.split(sep) : []) : null;
 }
+// A PEOS agent's write: its own run file, or for the profiler the profile and an
+// instruction file that does not exist yet.
+async function agentWriteAllowed(project, agent, path) {
+  if (agent === 'peos:profiler') {
+    if (path === resolve(project, '.project-os/project-profile.md')) return !(await lstat(path).catch(() => null))?.isSymbolicLink();
+    return ['AGENTS.md', 'CLAUDE.md'].some(name => path === resolve(project, name)) && !(await lstat(path).catch(() => null));
+  }
+  const parts = within(resolve(project, '.project-os/runs'), path);
+  if (parts === null || parts.length !== 2 || parts[0].startsWith('.')) return false;
+  // An evaluator writes only reports named after itself: eval-code → pending-eval-code[-<focus>].json.
+  const evaluator = /^peos:eval-([a-z]+)$/.exec(agent)?.[1];
+  const own = agentRunFile[agent] ?? (evaluator ? name => new RegExp(`^pending-eval-${evaluator}(?:-[a-z]+)?\\.json$`).test(name) : () => false);
+  // Only inside an existing run, never a directory the agent invents.
+  const run = await lstat(resolve(project, '.project-os/runs', parts[0], 'state.json')).catch(() => null);
+  return own(parts[1]) && Boolean(run?.isFile()) && !(await lstat(path).catch(() => null))?.isSymbolicLink();
+}
 async function writeAllowed(project, path) {
   const parts = within(resolve(project, '.project-os/runs'), path);
   if (parts === null) return true;
-  if (parts.length !== 2 || parts[0].startsWith('.') || !writableArtifacts.includes(parts[1].toLowerCase())) return false;
+  if (parts.length !== 2 || parts[0].startsWith('.') || !(writableArtifacts.includes(parts[1].toLowerCase()) || pendingReport.test(parts[1]))) return false;
   const current = await lstat(path).catch(() => null);
   return !current?.isSymbolicLink();
 }
@@ -85,13 +106,17 @@ if (!input) {
   const project = await projectRoot(input);
   const implementer = input.agent_type === 'peos:implementer';
   if (typeof input.agent_type === 'string' && peosAgents.test(input.agent_type) && [...writeTools, 'Bash'].includes(tool)) {
-    deny('PEOS agents return their result to the orchestrator; they do not write files or run commands.');
+    const target = tool === 'Write' && project ? String(args.file_path ?? '') : '';
+    const path = target ? await canonical(isAbsolute(target) ? target : resolve(input.cwd ?? project, target)) : null;
+    if (!path || !(await agentWriteAllowed(project, input.agent_type, path))) {
+      deny('PEOS agents run no commands and write only their own output file named by the orchestrator.');
+    }
   } else if (writeTools.includes(tool) && project) {
     const target = String(args.file_path ?? args.notebook_path ?? '');
     if (target) {
       const path = await canonical(isAbsolute(target) ? target : resolve(input.cwd ?? project, target));
       if (implementer && within(resolve(project, '.project-os'), path) !== null) deny('The implementer changes project code only; .project-os belongs to the orchestrator and peos-run.');
-      else if (!(await writeAllowed(project, path))) deny('Under .project-os/runs only the run\'s Markdown artifacts and pending-eval.json may be written; state, evidence and decisions belong to peos-run.');
+      else if (!(await writeAllowed(project, path))) deny('Under .project-os/runs only the run\'s Markdown artifacts and pending evaluation reports may be written; state, evidence and decisions belong to peos-run.');
     }
   } else if (tool === 'Bash') {
     const command = String(args.command ?? '');

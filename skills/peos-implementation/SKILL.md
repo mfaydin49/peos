@@ -1,6 +1,6 @@
 ---
 name: peos-implementation
-description: Implement a scoped feature or bugfix against an existing task contract and project conventions, with relevant tests and completion evidence.
+description: Codex workflow, not part of the /peos: plugin flow. Implement a scoped feature or bugfix against an existing task contract and project conventions, with relevant tests and completion evidence.
 ---
 
 # Implementation

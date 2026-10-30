@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
-import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { main, parseArgs, projectDirectory, fail, ToolkitError } from './lib/cli.mjs';
 import { validateEvalReport, evalKey } from './lib/eval-report.mjs';
@@ -104,7 +104,7 @@ async function init(project, options) {
   try { await mkdir(directory); }
   catch (error) { if (error.code === 'EEXIST') fail('RUN_EXISTS', 'A run with this name already exists today.'); throw error; }
   // Evidence and state are working files; committed artifacts are the Markdown documents.
-  await writeFile(resolve(directory, '.gitignore'), 'state.json\nstate.lock\nchecks.json\nbaseline-checks.json\nchanges.diff\nmap.md\nevals/\npending-eval.json\n.stop-block\nusage.json\n*.tmp-*\n');
+  await writeFile(resolve(directory, '.gitignore'), 'state.json\nstate.lock\nchecks.json\nbaseline-checks.json\nchanges.diff\nmap.md\nevals/\npending-eval.json\npending-eval-*.json\n.stop-block\nusage.json\n*.tmp-*\n');
   const now = new Date().toISOString();
   const state = { schemaVersion: 1, run, type, tier, stage: 'intake',
     gates: Object.fromEntries(tierGates[tier].map(gate => [gate, { status: 'pending' }])),
@@ -188,10 +188,25 @@ async function readStdin() {
   return Buffer.concat(chunks).toString('utf8');
 }
 // "--report -" reads stdin, so the orchestrator can pass an evaluator's output without a temporary file.
+// A report file the evaluator wrote into the run directory is consumed once read, so the
+// next round writes a fresh file.
+const pendingReport = /^pending-eval-[a-z0-9-]+\.json$/;
+// What the orchestrator needs from a report without reading it: the blocking findings in
+// short form, counts, and whether the blocking findings repeat the previous round's.
+const blocking = report => report.findings.filter(finding => ['critical', 'high'].includes(finding.severity));
+const unmet = report => report.criteria.filter(criterion => criterion.status === 'not_met');
+function digest(report) {
+  return {
+    blocking: blocking(report).map(({ id, severity, file, problem, fix }) => ({ id, severity, ...(file ? { file } : {}), problem, fix })),
+    unmetCriteria: unmet(report).map(criterion => criterion.id),
+    nonBlocking: report.findings.length - blocking(report).length
+  };
+}
+const signature = report => JSON.stringify([...blocking(report).map(finding => `${finding.file ?? ''}|${finding.problem}`), ...unmet(report).map(criterion => criterion.id)].sort());
 async function recordEval(project, options) {
   const directory = await runDirectory(project, options.run);
   if (typeof options.report !== 'string') fail('INVOCATION', '--report requires a JSON file path or - for stdin.');
-  let input;
+  let input, consumed = null;
   try {
     let source;
     if (options.report === '-') source = await readStdin();
@@ -199,6 +214,7 @@ async function recordEval(project, options) {
       const path = resolve(options.report);
       if ((await stat(path)).size > reportLimit) fail('EVAL_REPORT', 'Report exceeds 1 MiB.');
       source = await readFile(path, 'utf8');
+      if (pendingReport.test(basename(path)) && await realpath(dirname(path)).catch(() => null) === directory) consumed = path;
     }
     input = JSON.parse(source);
   } catch (error) { if (error instanceof ToolkitError) throw error; fail('EVAL_REPORT', 'Report must be readable JSON.'); }
@@ -214,11 +230,17 @@ async function recordEval(project, options) {
     const previous = state.evals[key];
     const round = previous && previous.verdict !== 'PASS' ? previous.round + 1 : 1;
     if (round > 3) fail('ROUND_LIMIT', `${key} failed three rounds; stop and ask the user.`);
-    await writeJsonAtomic(resolve(await runSubdirectory(directory, 'evals'), `${key}.json`), report);
+    const evals = await runSubdirectory(directory, 'evals');
+    let earlier = null;
+    try { earlier = round > 1 ? JSON.parse(await readRunFile(evals, `${key}.json`) ?? 'null') : null; } catch { earlier = null; }
+    await writeJsonAtomic(resolve(evals, `${key}.json`), report);
     state.evals[key] = { verdict: report.verdict, round, subject: report.subject };
     await writeState(directory, state);
+    // The report is recorded: its pending file has served its purpose.
+    if (consumed) await rm(consumed, { force: true });
     // The third consecutive non-PASS round is the last: the orchestrator must stop and ask the user.
-    return { run: state.run, key, verdict: report.verdict, round, limitReached: report.verdict !== 'PASS' && round === 3 };
+    return { run: state.run, key, verdict: report.verdict, round, limitReached: report.verdict !== 'PASS' && round === 3,
+      plateau: report.verdict === 'FAIL' && earlier?.verdict === 'FAIL' && signature(earlier) === signature(report), ...digest(report) };
   });
 }
 // Gate decisions consume a grant left by the user's own command (design §12).
@@ -274,10 +296,14 @@ async function resetEval(project, options) {
     const state = await readState(directory);
     if (!Object.hasOwn(state.evals, options.key)) fail('INVOCATION', 'No evaluation with this key is recorded.');
     await consumeGrant(project, 'reset-eval', options.key, state.run);
+    const evals = await runSubdirectory(directory, 'evals');
+    // The last report's findings go back to the orchestrator: they are what the next round fixes.
+    let last = null;
+    try { last = JSON.parse(await readRunFile(evals, `${options.key}.json`) ?? 'null'); } catch { last = null; }
     delete state.evals[options.key];
-    await rm(resolve(await runSubdirectory(directory, 'evals'), `${options.key}.json`), { force: true });
+    await rm(resolve(evals, `${options.key}.json`), { force: true });
     await writeState(directory, state);
-    return { run: state.run, key: options.key, evals: state.evals };
+    return { run: state.run, key: options.key, evals: state.evals, ...(last?.findings ? { last: digest(last) } : {}) };
   });
 }
 // Records a user decision on hosts without the approval-capture hook (Codex, a terminal).

@@ -13,5 +13,8 @@ short name); without it, use the most recently updated run that is not `done` or
 
 1. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/peos-run.mjs" reset-eval --project "${CLAUDE_PROJECT_DIR}" --run <run> --key <key> --json`.
    It succeeds only right after the user typed this command. Report a refusal as is.
-2. On success, read ${CLAUDE_PLUGIN_ROOT}/skills/orchestrator/SKILL.md and redo that
-   stage from section 3, giving the producer the last blocking findings.
+   Its output `last.blocking` holds the findings of the report it cleared.
+2. On success, read ${CLAUDE_PLUGIN_ROOT}/skills/orchestrator/SKILL.md. For `spec` or
+   `plan`, continue at section 3 step 6 (`FAIL`): the producer gets `last.blocking`.
+   For a code evaluation (`code-*`, `security`), continue at section 6 step 3: the
+   implementer gets `last.blocking`, then sections 5 and 6 run again.

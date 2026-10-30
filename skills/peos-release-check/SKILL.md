@@ -1,6 +1,6 @@
 ---
 name: peos-release-check
-description: Assess release readiness from configured automated checks plus current acceptance, review, manual, environment, migration, and performance evidence; produce a report only.
+description: Codex workflow, not part of the /peos: plugin flow. Assess release readiness from configured automated checks plus current acceptance, review, manual, environment, migration, and performance evidence; produce a report only.
 ---
 
 # Release check

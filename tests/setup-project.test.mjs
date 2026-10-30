@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { basename, resolve } from 'node:path';
@@ -98,4 +99,32 @@ test('the Stop hook records usage for the run the session works on and status sh
   assert.deepEqual(record.calls, { m1: [1, 2, 3, 4] });
   const status = run(project, 'status', ['--run', name]);
   assert.deepEqual([status.usage.total, status.usage.budget, status.usage.overBudget], [10, 3_000_000, false]);
+});
+
+test('record-eval consumes a report file the evaluator wrote into the run directory', async t => {
+  const project = await repository(t);
+  await saveConfig(project, config());
+  const { run: name, directory } = run(project, 'init', ['--name', 'avatar', '--type', 'feature', '--tier', 'standard']);
+  run(project, 'advance', ['--run', name, '--to', 'spec']);
+  await writeFile(resolve(directory, 'spec.md'), 'spec');
+  const subject = `sha256:${createHash('sha256').update('spec').digest('hex')}`;
+  const report = JSON.stringify({ schemaVersion: 1, evaluator: 'spec', verdict: 'FAIL', mode: 'full', subject, criteria: [],
+    findings: [{ id: 'F1', severity: 'high', problem: 'AC-1 is not observable.', impact: 'Nobody can test it.', fix: 'Name the observable result.' }], notAssessed: [] });
+  const inside = resolve(directory, 'pending-eval-spec.json');
+  await writeFile(inside, report.replace(subject, `sha256:${'0'.repeat(64)}`));
+  assert.equal(run(project, 'record-eval', ['--run', name, '--report', inside]).error.code, 'STALE');
+  assert.ok(await readFile(inside, 'utf8'), 'a rejected report stays for inspection');
+  await writeFile(inside, report);
+  const first = run(project, 'record-eval', ['--run', name, '--report', inside]);
+  assert.deepEqual([first.round, first.plateau, first.nonBlocking, first.blocking.map(finding => finding.id)], [1, false, 0, ['F1']]);
+  assert.equal(first.blocking[0].fix, 'Name the observable result.');
+  await assert.rejects(readFile(inside), 'consumed once recorded');
+  const outside = resolve(project, 'pending-eval-spec.json');
+  await writeFile(outside, report);
+  const second = run(project, 'record-eval', ['--run', name, '--report', outside]);
+  assert.deepEqual([second.round, second.plateau], [2, true], 'same blocking findings twice');
+  assert.equal(await readFile(outside, 'utf8'), report, 'files elsewhere are left alone');
+  jsonCli('peos-run.mjs', ['grant', '--project', project, '--action', 'reset-eval', '--target', 'spec']);
+  const reset = run(project, 'reset-eval', ['--run', name, '--key', 'spec']);
+  assert.deepEqual(reset.last.blocking.map(finding => finding.problem), ['AC-1 is not observable.'], 'the cleared findings come back');
 });

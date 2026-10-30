@@ -1,6 +1,6 @@
 ---
 name: peos-code-review
-description: Perform a read-only review of a selected diff or files against acceptance criteria, project policy, and relevant engineering risks.
+description: Codex workflow, not part of the /peos: plugin flow. Perform a read-only review of a selected diff or files against acceptance criteria, project policy, and relevant engineering risks.
 ---
 
 # Code review

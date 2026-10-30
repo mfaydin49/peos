@@ -31,7 +31,7 @@ test('plugin and marketplace manifests agree with the package', async () => {
   assert.deepEqual(marketplace.plugins.map(entry => [entry.name, entry.source]), [['peos', './']]);
 });
 
-test('agents are named after their file, cannot delegate, and only the implementer writes or runs commands', async () => {
+test('agents are named after their file, cannot delegate, and only the implementer edits code or runs commands', async () => {
   assert.deepEqual(agentFiles.sort(), ['eval-code.md', 'eval-plan.md', 'eval-security.md', 'eval-spec.md', 'implementer.md', 'investigator.md', 'planner.md', 'profiler.md', 'spec-writer.md']);
   for (const name of agentFiles) {
     const { fields } = await document(resolve(toolkit, 'agents', name));
@@ -41,8 +41,9 @@ test('agents are named after their file, cannot delegate, and only the implement
     const tools = list(fields.tools);
     assert.ok(!tools.includes('Agent'), `${name}: Agent`);
     if (name === 'implementer.md') { assert.deepEqual(tools.sort(), ['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write']); continue; }
-    // Producers and evaluators return content to the orchestrator; only it writes run files.
-    for (const forbidden of ['Edit', 'Write', 'NotebookEdit', 'Bash']) assert.ok(!tools.includes(forbidden), `${name}: ${forbidden}`);
+    // Producers, evaluators and the profiler write only their own output file (state-guard
+    // enforces the path); the investigator writes nothing. None edits or runs commands.
+    for (const forbidden of ['Edit', 'NotebookEdit', 'Bash', ...(name === 'investigator.md' ? ['Write'] : [])]) assert.ok(!tools.includes(forbidden), `${name}: ${forbidden}`);
   }
 });
 

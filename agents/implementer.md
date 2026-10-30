@@ -37,7 +37,8 @@ starting the next):
 6. Never touch `.project-os/`, commit, push, or install anything. Never read secret
    files (`.env*`, keys, credentials).
 
-Output nothing but these blocks: one per step you were given, in order.
+Output nothing but these blocks: one per step you were given, in order. Keep each
+field to one short line; the evaluators read the code and the diff, not your report.
 
 ```text
 STEP S<n>: DONE
