@@ -14,6 +14,9 @@
 ## Evaluations
 <!-- Evaluator — verdict — rounds — remaining non-blocking findings. -->
 
+## Shortcuts and accepted flags
+<!-- Each shortcut: marker with its upgrade trigger; each floor flag accepted and why. -->
+
 ## Not verified
 <!-- Anything degraded, unavailable, or out of scope. -->
 

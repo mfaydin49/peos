@@ -456,8 +456,11 @@ Residual risks of the grant design, accepted for increment 4 and documented:
   sees it in the change list (`changes`) and the diff.
 - The configuration binding covers `.project-os/engineering.config.json` only. A
   check that calls a project script (`npm test`) can be weakened through that script
-  (`package.json`, test configuration); the change is in the diff, where `eval-code`
-  (focus `tests`/`quality`) must flag weakened or skipped tests.
+  (`package.json`, test configuration). Since increment 5c the floor guard in `changes`
+  flags the common forms deterministically (skipped or focused tests, removed
+  assertions, deleted tests, suppression comments, empty `catch`/stubs, changed
+  coverage thresholds in known config files) and `eval-code` must justify or block
+  each; other forms remain visible only in the diff.
 - The main session could edit project code itself instead of the implementer; that
   keeps evaluator independence procedural, like the next item.
 - The orchestrator relays evaluator reports through `pending-eval.json`, so the main
@@ -537,6 +540,7 @@ Each increment is independently usable and verified before the next.
 | 4 | Hooks: `approval-capture`, `state-guard`, `session-resume`, `gate-stop`; grants; `/peos:retry` | **done 2026-10-29**: hook scripts tested with host-shaped input, including bypasses found in two security review rounds (quoting, case, working directory, expansion inside quotes, globs, `find`, environment changes, concurrent grant use). Model-driven on the fixture (2026-10-29): a plain-language "approve the plan" request left the gate pending and the model pointed to `/peos:approve plan` ($0.19); typing `/peos:approve plan` created a grant that `approve` consumed, then the run advanced to `implement` ($0.20); SessionStart context and no false denials of the flow's own commands |
 | 5 | Implementer + `eval-code` + `eval-security` + triggers; `peos-run changes`; config binding | structure and scripts **done 2026-10-29** (tests for diff, triggers, config binding, implementer guard); model-driven on the fixture (2026-10-29, $0.97, 24 turns): `/peos:continue` ran `implementer` for S1 and S2, recorded full task checks (17 tests PASS), ran `eval-code` (PASS, 12/12 criteria; no security trigger matched) and reached the release stage with `summary.md`, changes left uncommitted; behavior verified independently. Seeded-defect run (2026-10-30, $1.24): an `export` command implemented without the overwrite and working-directory rules of its acceptance criteria, with a happy-path test only (all checks PASS). Round 1: `eval-code` and `eval-security` both FAILed with high findings for both defects (and the missing tests); `implementer` fixed them; checks re-recorded (22 tests); round 2 both PASS; release stage reached; behavior verified independently. Found and fixed: a 300-character `notAssessed` limit unknown to evaluators, and the orchestrator ending its turn while waiting for a re-sent report |
 | 5b | Refactor support: `record-baseline`, `modifiedTests`, refactor rubric, template and agent notes | **done 2026-10-30**: tests for baseline binding to the start state, release rule, modified-test listing (moves, snapshots, layouts), resume flag; reviewed once; not yet exercised by a model |
+| 5c | Quality guardrails: floor guard flags and `shortcut:` markers in `changes`; `peos-run map`; least-new-code ladder and never-cut list; finding rule; planning size heuristics; security items and `llm` trigger | **done 2026-10-30**: tests for every flag kind with negative cases (identifiers, prose, test titles, dependency versions, keyboard shortcuts), CLI and quoted thresholds, section paths across type changes, markers, map shortening and ordering, `llm` trigger; reviewed twice. Model-driven on the fixture (2026-10-30): a seeded `test.skip` hiding a case-sensitivity bug was flagged `test-made-easier`; `eval-code` confirmed it (high), the implementer removed the skip and fixed the bug, a further unmet criterion was found and fixed, PASS in round 3 with the `shortcut:` marker treated as a decision and listed in `summary.md` ($1.34); a fresh small `/peos:start` request ran map → implementer (read `map.md`) → checks → `eval-code` PASS with no floor flags ($0.76) |
 | 6 | Release: `release-guard`, release report, CI/permission templates in `/peos:init` | deploy command denied without READY; template reviewed |
 | 7 | Large tier: idea, architect, milestones, `eval-performance`, `web`/`ios`/`android` profiles | a small app built end-to-end on web, iOS and Android |
 | 8 | Reference evaluation: 3 reference tasks, usage and defect-catch measurements | report of cost per tier and evaluator usefulness; tuning decisions recorded |
@@ -579,6 +583,17 @@ hooks on every tool call and inline hook code; per-agent copied defense text; fi
 80% coverage target; evaluators with write access; learning/instinct libraries;
 wholesale installation of a third-party plugin. ECC is MIT-licensed; copied text,
 if any, keeps attribution.
+
+Also taken, reimplemented in our own code and words (increment 5c), from two MIT-licensed
+projects: from dietrichgebert/ponytail, the least-new-code decision ladder with its
+never-cut list, `shortcut: <limit>, <when to upgrade>` markers, the regex code map, and
+"no concrete case, no finding"; from addyosmani/agent-skills, the floor guard against
+lowering the bar, planning size heuristics, and security items for LLM features,
+install scripts and path containment. Not taken from them: session-wide persona or skill
+injection, automatically triggered skills, mode levels, agents without tool limits,
+fail-open handling for gates, state outside the project, and cross-model CLI calls.
+Their web-performance, accessibility, release and evaluation-method material is kept
+for increments 6–8.
 
 ## 20. Target repository layout
 

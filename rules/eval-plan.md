@@ -14,7 +14,10 @@ Blocking (`high` or `critical`):
 - A named file, module or API does not exist and the plan does not create it.
 
 Non-blocking (`medium` or `low`): a step that could be merged or removed, an
-abstraction without an established need, a risk without mitigation.
+abstraction without an established need, a risk without mitigation, a step touching
+more than about 8 files or covering several concerns, restructuring in a feature plan
+beyond what the change needs, new code for something the code map shows already
+exists.
 
 Verify claims about the codebase by reading the referenced files; do not assume.
 Use `criteria` to report, for each `AC-n`, `met` when a step covers it with a test,

@@ -7,6 +7,7 @@ import { validateEvalReport, evalKey } from './lib/eval-report.mjs';
 import { runActions } from './lib/run-actions.mjs';
 import { consumeGrant, insideClaudeCode, writeGrant } from './lib/grants.mjs';
 import { codeChanges } from './lib/changes.mjs';
+import { codeMap } from './lib/map.mjs';
 import { requireRoot, headCommit } from './lib/git.mjs';
 import {
   runsPath, types, tiers, stages, tierGates, gateArtifacts, gateEvalKeys, runDirectory, runSubdirectory, readRunFile,
@@ -101,7 +102,7 @@ async function init(project, options) {
   try { await mkdir(directory); }
   catch (error) { if (error.code === 'EEXIST') fail('RUN_EXISTS', 'A run with this name already exists today.'); throw error; }
   // Evidence and state are working files; committed artifacts are the Markdown documents.
-  await writeFile(resolve(directory, '.gitignore'), 'state.json\nstate.lock\nchecks.json\nbaseline-checks.json\nchanges.diff\nevals/\npending-eval.json\n.stop-block\n*.tmp-*\n');
+  await writeFile(resolve(directory, '.gitignore'), 'state.json\nstate.lock\nchecks.json\nbaseline-checks.json\nchanges.diff\nmap.md\nevals/\npending-eval.json\n.stop-block\n*.tmp-*\n');
   const now = new Date().toISOString();
   const state = { schemaVersion: 1, run, type, tier, stage: 'intake',
     gates: Object.fromEntries(tierGates[tier].map(gate => [gate, { status: 'pending' }])),
@@ -282,19 +283,29 @@ async function grant(project, options) {
   if (options.run !== undefined) await runDirectory(project, options.run);
   return { grant: await writeGrant(project, { action, target: options.target, run: options.run ?? null, source: 'cli' }) };
 }
+// Reuse aid: the code map, printed or written to <run>/map.md for the planner and implementer.
+async function map(project, options) {
+  requireRoot(project);
+  const result = await codeMap(project);
+  if (options.run === undefined) return result;
+  const directory = await runDirectory(project, options.run);
+  const mapPath = resolve(directory, 'map.md');
+  await writeAtomic(mapPath, `# Code map\n\nTop-level names per folder (regex-based; nested and dynamic definitions are missed).\n\n${result.map}\n`);
+  return { ...result, mapPath };
+}
 // Evaluator input: the net code diff against the run's base commit (excluding run files) and security triggers.
 async function changes(project, options) {
   const directory = await runDirectory(project, options.run);
   const state = await readState(directory);
   if (!state.baseHead) fail('TRANSITION', 'The run has not entered implementation yet.');
   const before = await fingerprint(project);
-  const { files, securityTriggers, modifiedTests, diff, truncated } = await codeChanges(project, state.baseHead);
+  const { files, securityTriggers, modifiedTests, floorFlags, shortcuts, diff, truncated } = await codeChanges(project, state.baseHead);
   const { codeState } = await fingerprint(project);
   // The diff must describe exactly the code state evaluators will certify.
   if (codeState !== before.codeState) fail('UNSTABLE', 'The code changed while the diff was computed; run changes again.');
   const diffPath = resolve(directory, 'changes.diff');
   await writeAtomic(diffPath, diff);
-  return { run: state.run, base: state.baseHead, codeState, files, securityTriggers, modifiedTests, diffPath, truncated };
+  return { run: state.run, base: state.baseHead, codeState, files, securityTriggers, modifiedTests, floorFlags, shortcuts, diffPath, truncated };
 }
 async function advance(project, options) {
   const directory = await runDirectory(project, options.run);
@@ -344,7 +355,7 @@ async function step(project, options) {
   });
 }
 
-const handlers = { init, status, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step, grant, changes, 'record-baseline': recordBaseline,
+const handlers = { init, status, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step, grant, changes, 'record-baseline': recordBaseline, map,
   fingerprint: project => fingerprint(project) };
 
 await main(async () => {
@@ -368,6 +379,7 @@ await main(async () => {
     report.assessment.checks ? `checks: ${report.assessment.checks.status} ${report.assessment.checks.verification} ${report.assessment.checks.phase}${report.assessment.checks.fresh ? '' : ' (stale)'}` : 'checks: none recorded'
   ].join('\n');
   if (report.action === 'fingerprint') return `${report.codeState} (HEAD ${report.head}, ${report.changedPaths} changed paths)`;
+  if (report.action === 'map') return report.mapPath ? `Code map written to ${JSON.stringify(report.mapPath)} (${report.folders} folders).` : report.map || 'No top-level definitions found.';
   if (report.action === 'record-baseline') return `${report.baseline.status}: refactor baseline recorded for ${report.run} at ${report.baseline.base.slice(0, 12)}`;
   if (report.action === 'record-checks') return `${report.checks.status}: checks recorded for ${report.run}${report.checks.codeState ? '' : ` — ${report.checks.codeStateNote}`}`;
   if (report.action === 'record-eval') return `${report.verdict}: ${report.key} round ${report.round} recorded for ${report.run}`;

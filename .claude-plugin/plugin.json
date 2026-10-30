@@ -1,6 +1,6 @@
 {
   "name": "peos",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Personal Engineering OS: gated, evidence-based pipeline from idea to release-ready change, with independent evaluators.",
   "author": {
     "name": "mfaydin49"

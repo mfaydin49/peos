@@ -346,6 +346,9 @@ test('changes reads only regular untracked text, scans non-test code, and diffs 
   assert.match(diff, /binary file, 4 bytes/);
   assert.deepEqual(report.securityTriggers, [], 'author is not authentication; test-file I/O is not a trigger');
   await writeFile(resolve(project, 'run.py'), 'import subprocess, sys\nsubprocess.run(sys.argv[1:])\n');
+  await writeFile(resolve(project, 'ask.py'), 'from anthropic import Anthropic\n');
+  assert.ok(run(project, 'changes', ['--run', name]).report.securityTriggers.includes('llm'));
+  await unlink(resolve(project, 'ask.py'));
   assert.deepEqual(run(project, 'changes', ['--run', name]).report.securityTriggers, ['code-execution', 'user-input']);
   // A commit during the run stays visible: the diff base is the commit the run started from.
   git(project, 'add', 'author.js');
@@ -444,4 +447,124 @@ test('test paths cover common layouts', async () => {
   for (const path of ['pkg/test_foo.py', 'MyAppTests/FooTests.swift', 'app/src/androidTest/X.kt', 'src/FooTest.java', 'src/__snapshots__/a.test.js.snap',
     'pkg/testdata/out.golden', 'svc/foo_test.go', 'tests/unit.rs', 'spec/models/user_spec.rb', 'web/a.spec.ts']) assert.ok(testPath.test(path), path);
   for (const path of ['src/contests/score.js', 'src/latest.js', 'docs/testing.md', 'src/attestation.py']) assert.ok(!testPath.test(path), path);
+});
+
+test('floor guard flags lowered bars and collects shortcut markers', async t => {
+  const { project, name } = await start(t, 'small');
+  await mkdir(resolve(project, 'test'));
+  await mkdir(resolve(project, 'src'));
+  await writeFile(resolve(project, 'test/a.test.js'), "test('a', () => {\n  expect(f(1)).toBe(2);\n  expect(f(2)).toBe(3);\n});\n");
+  await writeFile(resolve(project, 'test/old.test.js'), "test('old', () => expect(1).toBe(1));\n");
+  await writeFile(resolve(project, 'jest.config.js'), "module.exports = { coverageThreshold: { global: { lines: 90 } } };\n");
+  await writeFile(resolve(project, 'src/f.js'), 'export const f = x => x + 1;\n');
+  git(project, 'add', '-A'); git(project, 'commit', '-m', 'base');
+  run(project, 'advance', ['--run', name, '--to', 'implement']);
+  let report = run(project, 'changes', ['--run', name]).report;
+  assert.deepEqual([report.floorFlags, report.shortcuts], [[], []], 'clean start');
+  await writeFile(resolve(project, 'test/a.test.js'), "test.skip('a', () => {\n  expect(f(1)).toBe(2);\n});\n");
+  await unlink(resolve(project, 'test/old.test.js'));
+  await writeFile(resolve(project, 'jest.config.js'), "module.exports = { coverageThreshold: { global: { lines: 50 } } };\n");
+  await writeFile(resolve(project, 'src/f.js'), [
+    '// eslint-disable-next-line no-eval', 'export const f = x => x + 1;',
+    'export function g() { try { risky(); } catch (e) {} }',
+    '// shortcut: linear scan, switch to an index above 10k items', '// shortcut: no retries'
+  ].join('\n') + '\n');
+  report = run(project, 'changes', ['--run', name]).report;
+  const kinds = report.floorFlags.map(flag => `${flag.kind}:${flag.file}`).sort();
+  assert.deepEqual(kinds, ['assertions-removed:test/a.test.js', 'checker-silenced:src/f.js', 'test-deleted:test/old.test.js',
+    'test-made-easier:test/a.test.js', 'threshold-changed:jest.config.js', 'unfinished-work:src/f.js']);
+  assert.deepEqual(report.shortcuts.map(marker => [marker.file, marker.hasTrigger]), [['src/f.js', true], ['src/f.js', false]]);
+});
+
+test('the code map lists top-level names per folder, shared code first, without tests or vendored code', async t => {
+  const { project, name, dir } = await start(t, 'small');
+  const files = {
+    'src/lib/format.js': 'export function formatDate() {}\nexport const pad = 1;\nfunction hidden() {}\n',
+    'src/app.ts': 'export class App {}\nexport { start as run, stop };\n',
+    'tools/build.py': 'def build():\n    pass\nclass Builder:\n    pass\ndef _private():\n    pass\n',
+    'svc/handler.go': 'package svc\nfunc Handle() {}\nfunc helper() {}\ntype Server struct{}\n',
+    'test/app.test.js': 'export function notListed() {}\n',
+    'node_modules/x/index.js': 'export function vendored() {}\n'
+  };
+  for (const [path, text] of Object.entries(files)) {
+    await mkdir(resolve(project, path, '..'), { recursive: true });
+    await writeFile(resolve(project, path), text);
+  }
+  const { report } = run(project, 'map');
+  const lines = report.map.split('\n');
+  assert.equal(lines[0], 'src/lib/: format.js(formatDate, pad)', 'shared folder first');
+  assert.ok(lines.includes('src/: app.ts(App, run, stop)'));
+  assert.ok(lines.includes('tools/: build.py(build, Builder)'));
+  assert.ok(lines.includes('svc/: handler.go(Handle, Server)'));
+  assert.doesNotMatch(report.map, /notListed|vendored|hidden|_private|helper/);
+  const written = run(project, 'map', ['--run', name]).report;
+  assert.equal(written.mapPath, resolve(dir, 'map.md'));
+  assert.match(await readFile(written.mapPath, 'utf8'), /formatDate/);
+});
+
+test('floor guard and markers ignore ordinary code, prose and dependency bumps', async t => {
+  const { project, name } = await start(t, 'small');
+  await mkdir(resolve(project, 'test'));
+  await mkdir(resolve(project, 'src'));
+  await writeFile(resolve(project, 'package.json'), '{\n  "devDependencies": { "@vitest/coverage-v8": "^1.0.0" }\n}\n');
+  await writeFile(resolve(project, 'test/a.test.js'), "it('should add', () => {\n  expect(add(1)).toBe(2);\n});\n");
+  await writeFile(resolve(project, 'vite.config.ts'), 'export default { test: { coverage: { thresholds: { lines: 90 } } } };\n');
+  await writeFile(resolve(project, 'test/p_test.py'), 'def test_p():\n    assert p() == 1\n');
+  git(project, 'add', '-A'); git(project, 'commit', '-m', 'base');
+  run(project, 'advance', ['--run', name, '--to', 'implement']);
+  await writeFile(resolve(project, 'package.json'), '{\n  "devDependencies": { "@vitest/coverage-v8": "^2.0.0" }\n}\n');
+  await writeFile(resolve(project, 'test/a.test.js'), "it('adds', () => {\n  expect(add(1)).toBe(2);\n});\n");
+  await writeFile(resolve(project, 'src/todo.js'), [
+    'export function toggle(todo) { return { ...todo, done: !todo.done }; }',
+    "export const handler = (req, res) => res.status(501).send('Not implemented');",
+    "export const keys = [{ label: 'Save', shortcut: 'Ctrl+S' }];",
+    '/* shortcut: in-memory cache, move to Redis above one instance */ export const cache = new Map(); // shortcut: no TTL'
+  ].join('\n') + '\n');
+  await writeFile(resolve(project, 'README.md'), 'Export is not implemented yet. TODO: docs. // shortcut: none\n');
+  let report = run(project, 'changes', ['--run', name]).report;
+  assert.deepEqual(report.floorFlags, [], JSON.stringify(report.floorFlags));
+  assert.deepEqual(report.shortcuts.map(marker => [marker.text, marker.hasTrigger]),
+    [['in-memory cache, move to Redis above one instance', true], ['no TTL', false]]);
+  await writeFile(resolve(project, 'vite.config.ts'), 'export default { test: { coverage: { thresholds: { lines: 10 } } } };\n');
+  await writeFile(resolve(project, 'package.json'), '{\n  "devDependencies": { "@vitest/coverage-v8": "^2.0.0" }\n}\n');
+  await writeFile(resolve(project, 'src/stub.js'), "export function f() { throw new Error('Not implemented'); }\n/** shortcut: in-memory cache, move to redis with >1 instance */\n");
+  await writeFile(resolve(project, 'test/p_test.py'), 'import unittest\n@unittest.skipIf(True, "x")\ndef test_p():\n    p()\n');
+  report = run(project, 'changes', ['--run', name]).report;
+  assert.deepEqual(report.floorFlags.map(flag => `${flag.kind}:${flag.file}`).sort(),
+    ['assertions-removed:test/p_test.py', 'test-made-easier:test/p_test.py', 'threshold-changed:vite.config.ts', 'unfinished-work:src/stub.js']);
+  assert.ok(report.shortcuts.some(marker => marker.text === 'in-memory cache, move to redis with >1 instance'), 'one-line JSDoc marker');
+});
+
+test('diff sections keep their own paths across type changes, and big folders are shortened in the map', async t => {
+  const { project, name } = await start(t, 'small');
+  await mkdir(resolve(project, 'test'));
+  await writeFile(resolve(project, 'test/a.test.js'), "test('a', () => expect(1).toBe(1));\n");
+  await writeFile(resolve(project, 'test/z.test.js'), "test('z', () => expect(1).toBe(1));\n");
+  git(project, 'add', '-A'); git(project, 'commit', '-m', 'base');
+  run(project, 'advance', ['--run', name, '--to', 'implement']);
+  await unlink(resolve(project, 'test/a.test.js'));
+  await symlink('z.test.js', resolve(project, 'test/a.test.js'));
+  await writeFile(resolve(project, 'test/z.test.js'), "test('z', () => {});\n");
+  const flags = run(project, 'changes', ['--run', name]).report.floorFlags.map(flag => `${flag.kind}:${flag.file}`);
+  assert.ok(flags.includes('assertions-removed:test/z.test.js'), JSON.stringify(flags));
+  await mkdir(resolve(project, 'src'));
+  for (let i = 0; i < 150; i++) await writeFile(resolve(project, `src/module${i}.js`), `export function handlerNumber${i}() {}\nexport class ServiceNumber${i} {}\n`);
+  await writeFile(resolve(project, 'src/base.js'), 'export default class extends Object {}\nexport type { Shape } from "./shape";\n');
+  const { report } = run(project, 'map');
+  assert.match(report.map, /^src\/: .*module\d+\.js\(handlerNumber\d+, ServiceNumber\d+\).* … \+\d+ file\(s\)$/m);
+  assert.ok(report.map.length <= 6000);
+  assert.doesNotMatch(report.map, /\(extends\)/);
+});
+
+test('threshold flags cover CLI flags and quoted decimals but not versions', async t => {
+  const { project, name } = await start(t, 'small');
+  await writeFile(resolve(project, 'package.json'), '{\n  "scripts": { "cov": "pytest --cov-fail-under=80", "c8": "c8 --check-coverage --lines 90" },\n  "version": "1.2.3"\n}\n');
+  await writeFile(resolve(project, 'build.gradle.kts'), 'limit { minimum = "0.80".toBigDecimal() }\n');
+  git(project, 'add', '-A'); git(project, 'commit', '-m', 'base');
+  run(project, 'advance', ['--run', name, '--to', 'implement']);
+  await writeFile(resolve(project, 'package.json'), '{\n  "scripts": { "cov": "pytest --cov-fail-under=10", "c8": "c8 --check-coverage --lines 10" },\n  "version": "1.2.4"\n}\n');
+  await writeFile(resolve(project, 'build.gradle.kts'), 'limit { minimum = "0.10".toBigDecimal() }\n');
+  const flags = run(project, 'changes', ['--run', name]).report.floorFlags.filter(flag => flag.kind === 'threshold-changed');
+  assert.deepEqual(flags.map(flag => flag.file).sort(), ['build.gradle.kts', 'package.json']);
+  assert.ok(flags.every(flag => !/"version"/.test(flag.text)), 'version bump is not a threshold');
 });

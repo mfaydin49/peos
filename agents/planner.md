@@ -20,6 +20,12 @@ Work:
 3. For every step list the files, the `AC-n` it covers, the tests written with it and
    its dependencies. Every acceptance criterion must be covered by at least one step.
 4. Mark a step `Parallel: yes` only when its files overlap no other parallel step.
+   Keep steps small: split a step that touches more than about 8 files or whose name
+   needs "and". If the whole change would exceed roughly 1000 changed lines, propose
+   splitting the work into separate runs under Risks. Restructuring beyond what this
+   change needs belongs in its own refactor run, not in a feature plan.
+   When the orchestrator gives a code map (`map.md`), check it before planning new
+   modules: reuse what exists.
 5. Do not introduce dependencies, services, migrations or public APIs the spec does not
    require; if one is unavoidable, say so under Risks as a decision for the user.
    For a refactor, read the tests that cover the code to change. Where they do not pin

@@ -20,7 +20,8 @@ they apply, and the project's own instructions.
 Work:
 
 1. Read the step, the acceptance criteria it covers and the code it touches. Reuse
-   existing modules, patterns and test helpers.
+   existing modules, patterns and test helpers; the code map (`map.md`), when given,
+   lists what the project already defines.
 2. Write the tests the step names together with the code, derived from its acceptance
    criteria. A bug fix starts with a test that fails before the fix.
 3. Change only the files the step lists, plus what those changes strictly require. If
@@ -40,6 +41,8 @@ STATUS: DONE
 Files: <changed files>
 Tests: <tests added or changed>
 Ran: <command> — <result>
+Shortcuts: <each `shortcut:` you added, or none>
+Not checked: <what you did not run or verify, or nothing>
 Notes: <anything the evaluators should know, or none>
 ```
 

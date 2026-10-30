@@ -27,6 +27,18 @@ implementation details rather than behavior; tests weakened, skipped or deleted;
 tests that cannot fail (no assertion, assertion on a mock of the code under test);
 a bug fix without a regression test. Non-blocking: test naming, helper reuse.
 
+## Floor flags and shortcuts (every focus)
+
+The orchestrator passes `floorFlags` from `changes`: pattern-based signs that the bar may
+have been lowered (tests skipped, focused or deleted, assertions removed, checkers
+silenced, empty `catch` or unfinished work, thresholds changed). Read each flagged line
+in context. If it is not a lowering of the bar (a pattern false positive), dismiss it in
+one line under `notAssessed` ("flag X dismissed: reason"). If it is, it is blocking unless
+the spec, plan or a stated decision explains it (a test removed with its feature is
+fine); name the flag in the finding. `shortcuts` lists `shortcut:` markers: one with an
+upgrade trigger that does not cut a never-cut item is a decision, not a finding; one
+without a trigger is a `low` finding.
+
 ## Focus `all`
 
 Apply all three sections and report every criterion in `criteria`.

@@ -13,7 +13,8 @@ skills, seven agents (spec, plan, implementation and four evaluators) and hooks 
 protect run state and human gate decisions. The direction is specified in the [v2 design](docs/design/peos-v2-plugin.md);
 increments 1–5 are implemented: request → spec → plan → implementation →
 checks → independent code and security evaluation → release stage, with extra
-behavior-preservation rules for refactor runs.
+behavior-preservation rules for refactor runs and deterministic quality guardrails
+(floor guard, shortcut markers, code map).
 
 The shared authorization policy lets already-approved project-local implementation,
 tests, browser/simulator checks, project start/stop, and agreed local database work

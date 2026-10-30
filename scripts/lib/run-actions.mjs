@@ -12,5 +12,6 @@ export const runActions = {
   step: ['project', 'run', 'step', 'status'],
   grant: ['project', 'action', 'target', 'run'],
   changes: ['project', 'run'],
-  'record-baseline': ['project', 'run']
+  'record-baseline': ['project', 'run'],
+  map: ['project', 'run']
 };

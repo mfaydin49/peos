@@ -13,7 +13,14 @@ Blocking (`critical` or `high`):
 - Sensitive data written to logs, error messages, analytics or client responses.
 - Weak or misused cryptography (home-made schemes, static IVs, fast hashes for
   passwords, disabled certificate checks).
-- A new dependency with a known critical vulnerability reported by a configured check.
+- A new dependency with a known critical vulnerability reported by a configured check,
+  or a new or changed install/lifecycle script (`preinstall`, `postinstall`, `prepare`)
+  that runs code on install without a stated need.
+- File paths built from untrusted input without resolving them (realpath) and checking
+  they stay inside an allowed root.
+- LLM features: model output used as code, a query, a shell command, a URL or HTML
+  without validation; permissions or data access decided by the prompt instead of code;
+  retrieved or user content placed into prompts without treating it as untrusted.
 
 Non-blocking: defense-in-depth improvements, missing rate limits where abuse is
 unlikely, hardening headers.

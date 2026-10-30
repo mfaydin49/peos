@@ -98,7 +98,8 @@ For each gated stage, in order `spec`, then `plan`:
 | plan | `peos:planner` | `templates/run/plan.md` | `plan.md` | `peos:eval-plan` |
 
 1. `peos-run advance --to <stage>`.
-2. Spawn the producer. On `STATUS: QUESTIONS`, ask the user (one question at a time
+2. Spawn the producer. Before the planner, run `peos-run map --run <run>` and give it
+   `<directory>/map.md`. On `STATUS: QUESTIONS`, ask the user (one question at a time
    if your host has a question tool), then spawn it again with the answers.
 3. On `STATUS: DRAFT`, write everything after the `STATUS: DRAFT` line (without a
    surrounding code fence, if any) to `<directory>/<artifact>`, otherwise unchanged.
@@ -129,7 +130,8 @@ approved plan is the user's consent to implement it.
 2. For each plan step in order (trivial and small runs: `task.md` is both the spec and
    the plan, with step `S1`):
    `peos-run step --run <run> --step <Sn> --status in_progress`; spawn
-   `peos:implementer` with the spec (or task) path, the plan path, the step ID and the
+   `peos:implementer` with the spec (or task) path, the plan path, the step ID,
+   `<directory>/map.md` (run `peos-run map --run <run>` before the first step) and the
    configured check commands (`executable` and `args` from the project configuration);
    on `STATUS: DONE`, `peos-run step --run <run> --step <Sn> --status done`; on
    `STATUS: BLOCKED`, stop and put the decision to the user.
@@ -152,8 +154,9 @@ approved plan is the user's consent to implement it.
    in this run (every recorded code evaluation must PASS on the final code state).
    Give each the spec (or task) path, the plan path (`task.md` again for trivial and
    small), `diffPath`, `<directory>/checks.json`, the triggers (security only) and
-   the subject. For a `refactor` run, also tell `eval-code` the run type and pass
-   `modifiedTests` from `changes`. Record each report.
+   the subject. Pass `floorFlags` and `shortcuts` from `changes` to `eval-code`. For
+   a `refactor` run, also tell it the run type and pass `modifiedTests`. Record each
+   report.
 3. If any is `FAIL`: spawn `peos:implementer` with all blocking findings, then return to
    section 5. The code state changes, so every code evaluation recorded so far runs
    again on the new state, plus any newly triggered one. Stop with the step-6 options of section 3 on `limitReached`
@@ -167,7 +170,8 @@ approved plan is the user's consent to implement it.
    run started with; report a refusal as is.
 2. Write `<directory>/summary.md` from `${CLAUDE_PLUGIN_ROOT}/templates/run/summary.md`:
    what changed, the acceptance evidence from the code evaluation's `criteria`, checks,
-   evaluations with rounds and remaining non-blocking findings, and what was not
+   evaluations with rounds and remaining non-blocking findings, the `shortcuts` with
+   their upgrade triggers, accepted floor flags with their reason, and what was not
    verified. Leave the readiness section as "Not assessed: release check arrives in
    increment 6".
 3. End the turn: the change is in the working tree, uncommitted, for the user to

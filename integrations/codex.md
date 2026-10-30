@@ -241,6 +241,7 @@ node /path/to/personal-engineering-os/scripts/peos-run.mjs advance --project /pa
 node /path/to/personal-engineering-os/scripts/peos-run.mjs step --project /path/to/project --run <run> --step S1 --status done
 node /path/to/personal-engineering-os/scripts/peos-run.mjs changes --project /path/to/project --run <run>
 node /path/to/personal-engineering-os/scripts/peos-run.mjs record-baseline --project /path/to/project --run <run>   # refactor runs, before any code change
+node /path/to/personal-engineering-os/scripts/peos-run.mjs map --project /path/to/project [--run <run>]
 ```
 
 - `--run` takes the dated run name or, when unique, the name alone (`AMBIGUOUS`
@@ -269,6 +270,16 @@ node /path/to/personal-engineering-os/scripts/peos-run.mjs record-baseline --pro
   current `codeState`. It fails with `UNSTABLE` if the code changed while it ran.
   Triggers decide whether the security evaluator runs; they are not findings.
   `modifiedTests` lists existing test files changed or removed since the base.
+  `floorFlags` lists deterministic signs that the bar was lowered (`test-made-easier`,
+  `assertions-removed`, `test-deleted`, `checker-silenced`, `unfinished-work`,
+  `threshold-changed`; at most 50; prose files skipped) for `eval-code` to justify,
+  block, or dismiss as a pattern false positive (known noise: `raise
+  NotImplementedError` in abstract Python methods, `#XXX` inside strings or regexes);
+  `shortcuts`
+  lists added `shortcut:` markers and whether each names an upgrade trigger.
+- `map` prints the code map (top-level names per source folder, shared folders first,
+  tests and vendored code excluded, regex-based, 6000-character budget), or writes it to
+  `<run>/map.md` with `--run`.
 - `record-baseline` (refactor runs) records the full task checks as
   `baseline-checks.json` on exactly the code state the run entered `implement` with
   (`baseCodeState`; earlier local edits are part of that state). It refuses once the
