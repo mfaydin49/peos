@@ -13,5 +13,6 @@ export const runActions = {
   grant: ['project', 'action', 'target', 'run'],
   changes: ['project', 'run'],
   'record-baseline': ['project', 'run'],
-  map: ['project', 'run']
+  map: ['project', 'run'],
+  setup: ['project']
 };

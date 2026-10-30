@@ -32,7 +32,7 @@ test('plugin and marketplace manifests agree with the package', async () => {
 });
 
 test('agents are named after their file, cannot delegate, and only the implementer writes or runs commands', async () => {
-  assert.deepEqual(agentFiles.sort(), ['eval-code.md', 'eval-plan.md', 'eval-security.md', 'eval-spec.md', 'implementer.md', 'planner.md', 'spec-writer.md']);
+  assert.deepEqual(agentFiles.sort(), ['eval-code.md', 'eval-plan.md', 'eval-security.md', 'eval-spec.md', 'implementer.md', 'investigator.md', 'planner.md', 'profiler.md', 'spec-writer.md']);
   for (const name of agentFiles) {
     const { fields } = await document(resolve(toolkit, 'agents', name));
     assert.equal(fields.name, name.replace(/\.md$/, ''));

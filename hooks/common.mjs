@@ -1,4 +1,4 @@
-import { readdir, realpath } from 'node:fs/promises';
+import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { runsPath, runDirectory, readState } from '../scripts/lib/run-state.mjs';
 
@@ -35,4 +35,30 @@ export async function activeRuns(project) {
     } catch { /* not a readable run */ }
   }
   return runs.sort((a, b) => b.state.updatedAt.localeCompare(a.state.updatedAt));
+}
+// The session's transcript as parsed entries; large transcripts are skipped (hooks have seconds).
+const transcriptLimit = 64 * 1024 * 1024;
+export async function transcriptEntries(path) {
+  if (typeof path !== 'string') return [];
+  const current = await stat(path).catch(() => null);
+  if (!current?.isFile() || current.size > transcriptLimit) return [];
+  return (await readFile(path, 'utf8').catch(() => '')).split('\n')
+    .flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
+}
+// A session works on a run when it ran peos-run for it itself (--run <name>, or init
+// --name <name>). Mentions elsewhere (session-resume context, status listings) do not count.
+export function sessionRunNames(entries) {
+  const names = new Set();
+  for (const entry of entries) {
+    if (entry?.type !== 'assistant' || !Array.isArray(entry.message?.content)) continue;
+    for (const block of entry.message.content) {
+      const command = block?.type === 'tool_use' && block.name === 'Bash' ? String(block.input?.command ?? '') : '';
+      if (!command.includes('peos-run')) continue;
+      for (const match of command.matchAll(/--(?:run|name)\s+["']?([a-z0-9]+(?:-[a-z0-9]+)*)["']?(?=\s|$)/g)) names.add(match[1]);
+    }
+  }
+  return names;
+}
+export function worksOn(names, run) {
+  return names.has(run) || names.has(run.replace(/^\d{4}-\d{2}-\d{2}-/, ''));
 }

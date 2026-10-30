@@ -8,6 +8,8 @@ import { runActions } from './lib/run-actions.mjs';
 import { consumeGrant, insideClaudeCode, writeGrant } from './lib/grants.mjs';
 import { codeChanges } from './lib/changes.mjs';
 import { codeMap } from './lib/map.mjs';
+import { setupProject } from './lib/setup.mjs';
+import { summarizeUsage, usageFile } from './lib/usage.mjs';
 import { requireRoot, headCommit } from './lib/git.mjs';
 import {
   runsPath, types, tiers, stages, tierGates, gateArtifacts, gateEvalKeys, runDirectory, runSubdirectory, readRunFile,
@@ -102,7 +104,7 @@ async function init(project, options) {
   try { await mkdir(directory); }
   catch (error) { if (error.code === 'EEXIST') fail('RUN_EXISTS', 'A run with this name already exists today.'); throw error; }
   // Evidence and state are working files; committed artifacts are the Markdown documents.
-  await writeFile(resolve(directory, '.gitignore'), 'state.json\nstate.lock\nchecks.json\nbaseline-checks.json\nchanges.diff\nmap.md\nevals/\npending-eval.json\n.stop-block\n*.tmp-*\n');
+  await writeFile(resolve(directory, '.gitignore'), 'state.json\nstate.lock\nchecks.json\nbaseline-checks.json\nchanges.diff\nmap.md\nevals/\npending-eval.json\n.stop-block\nusage.json\n*.tmp-*\n');
   const now = new Date().toISOString();
   const state = { schemaVersion: 1, run, type, tier, stage: 'intake',
     gates: Object.fromEntries(tierGates[tier].map(gate => [gate, { status: 'pending' }])),
@@ -131,8 +133,11 @@ async function status(project, options) {
   try { codeState = await currentCodeState(project); }
   catch (error) { if (!(error instanceof ToolkitError) || error.code !== 'FINGERPRINT') throw error; codeStateError = error.message; }
   const { artifacts, ...assessment } = await assess(directory, state, codeState);
+  // Token use is written by the Stop hook; it informs, it never gates.
+  let usage = null;
+  try { usage = summarizeUsage(JSON.parse(await readRunFile(directory, usageFile) ?? 'null'), state.tier); } catch { usage = null; }
   // Artifact hashes are what spec and plan evaluators must name as their subject.
-  return { run: state.run, directory, state, codeState, ...(codeStateError ? { codeStateError } : {}), artifacts, assessment };
+  return { run: state.run, directory, state, codeState, ...(codeStateError ? { codeStateError } : {}), artifacts, assessment, usage };
 }
 async function recordChecks(project, options) {
   const directory = await runDirectory(project, options.run);
@@ -283,6 +288,12 @@ async function grant(project, options) {
   if (options.run !== undefined) await runDirectory(project, options.run);
   return { grant: await writeGrant(project, { action, target: options.target, run: options.run ?? null, source: 'cli' }) };
 }
+// Project setup: writes the configuration from the project's manifests when it is missing
+// and reports instruction files and the project profile's freshness.
+async function setup(project) {
+  requireRoot(project);
+  return setupProject(project);
+}
 // Reuse aid: the code map, printed or written to <run>/map.md for the planner and implementer.
 async function map(project, options) {
   requireRoot(project);
@@ -355,7 +366,7 @@ async function step(project, options) {
   });
 }
 
-const handlers = { init, status, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step, grant, changes, 'record-baseline': recordBaseline, map,
+const handlers = { init, status, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step, grant, changes, 'record-baseline': recordBaseline, map, setup,
   fingerprint: project => fingerprint(project) };
 
 await main(async () => {
@@ -376,13 +387,19 @@ await main(async () => {
     ...Object.entries(report.assessment.evals).map(([key, evaluation]) => `eval ${key}: ${evaluation.verdict} round ${evaluation.round}${evaluation.fresh ? '' : ' (stale)'}`),
     ...(report.assessment.baseline ? [`baseline: ${report.assessment.baseline.status} ${report.assessment.baseline.verification}${report.assessment.baseline.matches ? '' : ' (does not match this run)'}`]
       : report.state.type === 'refactor' ? ['baseline: none recorded (required for a refactor)'] : []),
-    report.assessment.checks ? `checks: ${report.assessment.checks.status} ${report.assessment.checks.verification} ${report.assessment.checks.phase}${report.assessment.checks.fresh ? '' : ' (stale)'}` : 'checks: none recorded'
+    report.assessment.checks ? `checks: ${report.assessment.checks.status} ${report.assessment.checks.verification} ${report.assessment.checks.phase}${report.assessment.checks.fresh ? '' : ' (stale)'}` : 'checks: none recorded',
+    ...(report.usage ? [`usage: ${(report.usage.total / 1e6).toFixed(1)}M tokens in ${report.usage.calls} model calls (budget ${(report.usage.budget / 1e6).toFixed(1)}M for ${report.state.tier})${report.usage.overBudget ? ' — over budget' : ''}`] : [])
   ].join('\n');
   if (report.action === 'fingerprint') return `${report.codeState} (HEAD ${report.head}, ${report.changedPaths} changed paths)`;
   if (report.action === 'map') return report.mapPath ? `Code map written to ${JSON.stringify(report.mapPath)} (${report.folders} folders).` : report.map || 'No top-level definitions found.';
   if (report.action === 'record-baseline') return `${report.baseline.status}: refactor baseline recorded for ${report.run} at ${report.baseline.base.slice(0, 12)}`;
   if (report.action === 'record-checks') return `${report.checks.status}: checks recorded for ${report.run}${report.checks.codeState ? '' : ` — ${report.checks.codeStateNote}`}`;
   if (report.action === 'record-eval') return `${report.verdict}: ${report.key} round ${report.round} recorded for ${report.run}`;
+  if (report.action === 'setup') return [
+    `config: ${report.config} (${report.checks.join('; ')})`,
+    ...Object.entries(report.instructions).map(([file, state]) => `${file}: ${state}`),
+    `profile: ${report.profile.status}${report.profile.reason ? ` (${report.profile.reason})` : ''}`
+  ].join('\n');
   if (report.action === 'init') return `Run ${report.run} created at ${JSON.stringify(report.directory)}.`;
   return `${report.action}: ${report.run} updated.`;
 });

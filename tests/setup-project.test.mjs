@@ -1,0 +1,101 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { basename, resolve } from 'node:path';
+import { config, git, jsonCli, repository, saveConfig, toolkit } from './helpers.mjs';
+import { detectChecks } from '../scripts/lib/setup.mjs';
+import { sessionCalls, summarizeUsage, totals } from '../scripts/lib/usage.mjs';
+
+const run = (project, action, args = []) => jsonCli('peos-run.mjs', [action, '--project', project, ...args]).report;
+const commit = (project, message = 'change') => { git(project, 'add', '.'); git(project, 'commit', '-m', message); };
+
+test('setup writes the configuration from the manifests and never overwrites it', async t => {
+  const project = await repository(t);
+  await writeFile(resolve(project, 'package.json'), JSON.stringify({ name: 'shop', scripts: { test: 'vitest run', typecheck: 'tsc --noEmit', lint: 'eslint .', build: 'next build' } }));
+  await writeFile(resolve(project, 'pnpm-lock.yaml'), '');
+  commit(project);
+  const report = run(project, 'setup');
+  assert.equal(report.config, 'created');
+  assert.deepEqual(report.checks, ['tests: pnpm run test', 'typecheck: pnpm run typecheck', 'lint: pnpm run lint', 'build: pnpm run build']);
+  assert.deepEqual(report.instructions, { 'AGENTS.md': 'missing', 'CLAUDE.md': 'missing' });
+  assert.equal(report.profile.status, 'missing');
+  const written = JSON.parse(await readFile(resolve(project, '.project-os/engineering.config.json'), 'utf8'));
+  assert.equal(written.projectName, 'shop');
+  assert.deepEqual(written.checks.find(entry => entry.id === 'build').phases, ['release']);
+  await saveConfig(project, config());
+  assert.equal(run(project, 'setup').config, 'existing');
+  assert.equal(JSON.parse(await readFile(resolve(project, '.project-os/engineering.config.json'), 'utf8')).projectName, 'fixture');
+});
+
+test('check detection covers package managers, placeholders and other ecosystems', async t => {
+  const project = await repository(t);
+  await writeFile(resolve(project, 'package.json'), JSON.stringify({ scripts: { test: 'echo "Error: no test specified" && exit 1', build: 'tsc' } }));
+  await writeFile(resolve(project, 'pyproject.toml'), '[tool.ruff]\nline-length = 100\n');
+  assert.deepEqual((await detectChecks(project)).map(entry => [entry.id, entry.executable, ...entry.args]), [['build', 'npm', 'run', 'build']]);
+  await writeFile(resolve(project, 'yarn.lock'), '');
+  await writeFile(resolve(project, 'go.mod'), 'module example.com/x\n');
+  assert.deepEqual((await detectChecks(project)).map(entry => [entry.id, entry.executable, ...entry.args]), [
+    ['build', 'yarn', 'run', 'build'], ['tests', 'go', 'test', './...'], ['vet', 'go', 'vet', './...'], ['go-build', 'go', 'build', './...']]);
+  await writeFile(resolve(project, 'pyproject.toml'), '[tool.pytest.ini_options]\n');
+  assert.ok((await detectChecks(project)).some(entry => entry.executable === 'python3'), 'pytest configured');
+  const empty = await repository(t);
+  assert.equal(run(empty, 'setup').error.code, 'SETUP');
+});
+
+test('the profile goes stale when manifests or many files change', async t => {
+  const project = await repository(t);
+  await saveConfig(project, config());
+  await writeFile(resolve(project, 'package.json'), '{}');
+  commit(project);
+  const head = git(project, 'rev-parse', 'HEAD').trim();
+  await mkdir(resolve(project, '.project-os'), { recursive: true });
+  await writeFile(resolve(project, '.project-os/project-profile.md'), `<!-- peos-profile head=${head} -->\n# Profile\n`);
+  assert.equal(run(project, 'setup').profile.status, 'fresh');
+  await writeFile(resolve(project, '.project-os/project-profile.md'), `\n\`\`\`markdown\n<!-- peos-profile head=${head} -->\n# Profile\n\`\`\`\n`);
+  assert.equal(run(project, 'setup').profile.status, 'fresh', 'a kept code fence is tolerated');
+  await writeFile(resolve(project, 'package.json'), '{"name":"x"}');
+  commit(project);
+  assert.deepEqual([run(project, 'setup').profile.status, run(project, 'setup').profile.reason], ['stale', 'a manifest changed']);
+  await writeFile(resolve(project, '.project-os/project-profile.md'), '# Profile without a commit\n');
+  assert.equal(run(project, 'setup').profile.status, 'stale');
+});
+
+// A host-shaped transcript: split assistant messages share an id and usage.
+function call(id, at, usage) {
+  return JSON.stringify({ type: 'assistant', timestamp: at, message: { id, usage: { input_tokens: usage[0], output_tokens: usage[1], cache_creation_input_tokens: usage[2], cache_read_input_tokens: usage[3] } } });
+}
+test('usage counts each model call once across the session, its subagents and copies', async t => {
+  const project = await repository(t);
+  const transcript = resolve(project, 'session-1.jsonl');
+  await writeFile(transcript, [call('m0', '2026-01-01T00:00:00Z', [9, 9, 9, 9]), call('m1', '2026-01-02T00:00:00Z', [1, 3, 100, 1000]),
+    call('m1', '2026-01-02T00:00:00Z', [1, 10, 100, 1000]), 'not json'].join('\n'));
+  await mkdir(resolve(project, 'session-1/subagents'), { recursive: true });
+  // A fork's transcript repeats the parent's call m1.
+  await writeFile(resolve(project, 'session-1/subagents/agent-a.jsonl'), [call('m1', '2026-01-02T00:00:00Z', [1, 10, 100, 1000]), call('s1', '2026-01-02T00:01:00Z', [2, 20, 200, 2000])].join('\n'));
+  const calls = await sessionCalls(transcript, Date.parse('2026-01-01T12:00:00Z'));
+  assert.deepEqual(totals(calls), { input: 3, output: 30, cacheWrite: 300, cacheRead: 3000, calls: 2, total: 3333 });
+  const summary = summarizeUsage({ sessions: { a: '', b: '' }, calls: { ...calls, big: [0, 0, 0, 7_000_000] } }, 'standard');
+  assert.deepEqual([summary.total, summary.calls, summary.sessions, summary.overBudget], [7_003_333, 3, 2, true]);
+  assert.equal(summarizeUsage({ sessions: {}, calls: {} }, 'small'), null);
+});
+
+test('the Stop hook records usage for the run the session works on and status shows it', async t => {
+  const project = await repository(t);
+  await saveConfig(project, config());
+  const { run: name, directory } = run(project, 'init', ['--name', 'avatar', '--type', 'feature', '--tier', 'small']);
+  const transcript_path = resolve(project, 'session-2.jsonl');
+  const now = new Date(Date.now() + 1000).toISOString();
+  const own = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'node "/x/scripts/peos-run.mjs" init --name avatar --type feature --tier small --json' } }] } });
+  await writeFile(transcript_path, [own, call('m1', now, [1, 2, 3, 4])].join('\n'));
+  const result = spawnSync(process.execPath, [resolve(toolkit, 'hooks/usage-record.mjs')], {
+    input: JSON.stringify({ cwd: project, transcript_path }), encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: project }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, '', 'never blocks');
+  const record = JSON.parse(await readFile(resolve(directory, 'usage.json'), 'utf8'));
+  assert.ok(record.sessions[basename(transcript_path, '.jsonl')]);
+  assert.deepEqual(record.calls, { m1: [1, 2, 3, 4] });
+  const status = run(project, 'status', ['--run', name]);
+  assert.deepEqual([status.usage.total, status.usage.budget, status.usage.overBudget], [10, 3_000_000, false]);
+});

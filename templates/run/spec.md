@@ -5,7 +5,8 @@ tier: standard | large
 # <Title>
 
 ## Goal
-<!-- The outcome for the user, not the implementation. -->
+<!-- The outcome for the user, not the implementation.
+     fix: the root cause and the evidence that shows it (log line, error, reproduction). -->
 
 ## Users and core flows
 <!-- large tier: who uses it and the main end-to-end flows. Otherwise remove. -->
@@ -26,7 +27,7 @@ tier: standard | large
 <!-- Performance budgets, accessibility, privacy, offline behavior, supported platforms. -->
 
 ## Decisions
-<!-- Decision — reason — who decided (user or agent proposal accepted). -->
+<!-- Decision — reason — who decided: user, or agent default (the user can change it at the gate). -->
 
 ## Open questions
 <!-- Must be empty before the spec gate. -->

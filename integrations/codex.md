@@ -242,6 +242,7 @@ node /path/to/personal-engineering-os/scripts/peos-run.mjs step --project /path/
 node /path/to/personal-engineering-os/scripts/peos-run.mjs changes --project /path/to/project --run <run>
 node /path/to/personal-engineering-os/scripts/peos-run.mjs record-baseline --project /path/to/project --run <run>   # refactor runs, before any code change
 node /path/to/personal-engineering-os/scripts/peos-run.mjs map --project /path/to/project [--run <run>]
+node /path/to/personal-engineering-os/scripts/peos-run.mjs setup --project /path/to/project
 ```
 
 - `--run` takes the dated run name or, when unique, the name alone (`AMBIGUOUS`
@@ -280,6 +281,18 @@ node /path/to/personal-engineering-os/scripts/peos-run.mjs map --project /path/t
 - `map` prints the code map (top-level names per source folder, shared folders first,
   tests and vendored code excluded, regex-based, 6000-character budget), or writes it to
   `<run>/map.md` with `--run`.
+- `setup` writes `.project-os/engineering.config.json` when it is missing, from the
+  project's manifests only (package scripts `test`, `typecheck`, `lint`, `build` with
+  the package manager of the lock file; `pytest`; `go test/vet/build`; `cargo`;
+  `swift`; `./gradlew`), and fails with `SETUP` when no test command is found. It
+  never changes an existing configuration. It reports whether `AGENTS.md` and
+  `CLAUDE.md` exist and whether `.project-os/project-profile.md` is `missing`,
+  `fresh` or `stale` (25 or more files, or any manifest, changed since the commit in
+  its first line).
+- `status --run` includes `usage` when the Stop hook has recorded `<run>/usage.json`:
+  total tokens of the sessions that worked on the run (main transcript and subagents,
+  each model call once) against a starting tier budget (trivial 1.5M, small 3M,
+  standard 6M, large 30M). It informs; it never gates.
 - `record-baseline` (refactor runs) records the full task checks as
   `baseline-checks.json` on exactly the code state the run entered `implement` with
   (`baseCodeState`; earlier local edits are part of that state). It refuses once the

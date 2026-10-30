@@ -15,7 +15,7 @@ import { readInput, projectRoot, emit } from './common.mjs';
 const peosRun = fileURLToPath(new URL('../scripts/peos-run.mjs', import.meta.url));
 const writableArtifacts = ['task.md', 'idea.md', 'spec.md', 'architecture.md', 'plan.md', 'summary.md', 'pending-eval.json'];
 const writeTools = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
-const peosAgents = /^peos:(?:eval-[a-z-]+|spec-writer|planner)$/;
+const peosAgents = /^peos:(?:eval-[a-z-]+|spec-writer|planner|investigator|profiler)$/;
 // Names only PEOS run state uses, matched in any directory and case. A project with its
 // own state.json or checks.json sees such shell commands refused (the Read/Write tools work).
 const protectedFile = /state\.json|checks\.json|state\.lock|\.grant\.json|\.stop-block|runs\/\S*evals/i;

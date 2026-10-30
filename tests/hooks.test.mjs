@@ -29,6 +29,8 @@ async function evaluatedSpec(project, name, directory, text = 'spec') {
   assert.equal(jsonCli('peos-run.mjs', ['record-eval', '--project', project, '--run', name, '--report', '-'], { input }).report.status, 'PASS');
 }
 const decision = report => report.error?.code ?? report.status;
+// A host-shaped transcript line in which the session itself ran peos-run for a run.
+const ranPeos = args => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'bash-1', name: 'Bash', input: { command: `node "/x/scripts/peos-run.mjs" ${args} --json` } }] } });
 
 test('decisions need a matching, fresh grant and consume it on every attempt', async t => {
   const { project, name, directory } = await standardRun(t);
@@ -87,6 +89,8 @@ test('state-guard denies writes to run state, evidence and decisions, and allows
     `node "${script}" record-eval --project "${project}" --run avatar --report "${directory}/pending-eval.json" --json`, 'npm test']) assert.equal(bash(command), null, command);
   assert.ok(denied(hook('state-guard', project, { agent_type: 'peos:eval-spec', tool_name: 'Bash', tool_input: { command: 'ls' } })));
   assert.ok(denied(hook('state-guard', project, { agent_type: 'peos:planner', tool_name: 'Write', tool_input: { file_path: resolve(project, 'x') } })));
+  assert.ok(denied(hook('state-guard', project, { agent_type: 'peos:investigator', tool_name: 'Bash', tool_input: { command: 'ls' } })));
+  assert.ok(denied(hook('state-guard', project, { agent_type: 'peos:profiler', tool_name: 'Write', tool_input: { file_path: resolve(project, 'AGENTS.md') } })));
   assert.equal(hook('state-guard', project, { agent_type: 'Explore', tool_name: 'Bash', tool_input: { command: 'ls' } }), null);
   assert.ok(denied(hook('state-guard', project, '{"tool_input": ".grant.json"')), 'unreadable call naming PEOS state');
 });
@@ -95,9 +99,10 @@ test('gate-stop blocks once for an unevaluated fresh artifact and respects profi
   const { project, name, directory } = await standardRun(t);
   run(project, 'advance', ['--run', name, '--to', 'spec']);
   const transcript_path = resolve(project, 'transcript.jsonl');
-  await writeFile(transcript_path, `{"tool":"peos-run init","run":"${name}"}\n`);
+  await writeFile(transcript_path, `${ranPeos('init --name avatar --type feature --tier standard')}\n`);
   const unrelated = resolve(project, 'other-session.jsonl');
-  await writeFile(unrelated, '{"text":"unrelated work"}\n');
+  // Another session only saw the run named (session-resume context, a status listing).
+  await writeFile(unrelated, `${JSON.stringify({ type: 'user', message: { content: `PEOS: unfinished run ${name} at spec` } })}\n${ranPeos('status')}\n`);
   assert.equal(hook('gate-stop', project, { transcript_path }), null, 'no artifact yet');
   await writeFile(resolve(directory, 'spec.md'), 'draft');
   assert.equal(hook('gate-stop', project, { transcript_path }, 'minimal'), null);
@@ -108,6 +113,42 @@ test('gate-stop blocks once for an unevaluated fresh artifact and respects profi
   assert.equal(hook('gate-stop', project, { transcript_path }), null, 'blocks at most once per artifact version');
   await evaluatedSpec(project, name, directory, 'draft v2');
   assert.equal(hook('gate-stop', project, { transcript_path }), null, 'evaluated artifact');
+});
+
+test('gate-stop waits for an evaluator running in the background', async t => {
+  const { project, name, directory } = await standardRun(t);
+  run(project, 'advance', ['--run', name, '--to', 'spec']);
+  await writeFile(resolve(directory, 'spec.md'), 'draft');
+  const at = new Date(Date.now() + 1000).toISOString();
+  const launch = agent => JSON.stringify({ type: 'assistant', timestamp: at, message: { content: [{ type: 'tool_use', id: `call-${agent}`, name: 'Agent', input: { subagent_type: agent, prompt: name } }] } });
+  const result = agent => JSON.stringify({ type: 'user', timestamp: at, message: { content: [{ type: 'tool_result', tool_use_id: `call-${agent}`, content: [{ type: 'text', text: `Async agent launched successfully.\nagentId: id-${agent.replace(':', '-')} (internal ID)` }] }] } });
+  const foreground = agent => JSON.stringify({ type: 'user', timestamp: at, message: { content: [{ type: 'tool_result', tool_use_id: `call-${agent}`, content: [{ type: 'text', text: '{"verdict":"FAIL"}\nagentId: abc123 (use SendMessage to continue)' }] }] } });
+  const handBack = agent => JSON.stringify({ type: 'user', timestamp: at, message: { content: `Another Claude session sent a message:\n<agent-message from="id-${agent.replace(':', '-')}">\nreport` } });
+  const transcript_path = resolve(project, 'transcript.jsonl');
+  const own = ranPeos(`status --run ${name}`);
+  await writeFile(transcript_path, [own, launch('peos:planner'), result('peos:planner')].join('\n'));
+  assert.equal(hook('gate-stop', project, { transcript_path }).decision, 'block', 'another agent does not count');
+  await writeFile(resolve(directory, 'spec.md'), 'draft v2');
+  await writeFile(transcript_path, [own, launch('peos:eval-spec'), result('peos:eval-spec')].join('\n'));
+  assert.equal(hook('gate-stop', project, { transcript_path }), null, 'evaluator still running');
+  await writeFile(transcript_path, [own, launch('peos:eval-spec'), result('peos:eval-spec'), handBack('peos:eval-spec')].join('\n'));
+  assert.equal(hook('gate-stop', project, { transcript_path }).decision, 'block', 'handed back but not recorded');
+  await writeFile(resolve(directory, 'spec.md'), 'draft v3');
+  await writeFile(transcript_path, [own, launch('peos:eval-spec'), foreground('peos:eval-spec')].join('\n'));
+  assert.equal(hook('gate-stop', project, { transcript_path }).decision, 'block', 'a foreground evaluator has finished');
+});
+
+test('gate-stop picks the run the session works on, not a run whose name contains it', async t => {
+  const { project, name, directory } = await standardRun(t);
+  const other = run(project, 'init', ['--name', 'avatar-v2', '--type', 'feature', '--tier', 'standard']);
+  run(project, 'advance', ['--run', name, '--to', 'spec']);
+  run(project, 'advance', ['--run', other.run, '--to', 'spec']);
+  await writeFile(resolve(directory, 'spec.md'), 'draft');
+  const transcript_path = resolve(project, 'transcript.jsonl');
+  await writeFile(transcript_path, `${ranPeos(`status --run ${other.run}`)}\n`);
+  assert.equal(hook('gate-stop', project, { transcript_path }), null, 'avatar-v2 has no spec; avatar is not this session\'s run');
+  await writeFile(transcript_path, `${ranPeos('status --run avatar')}\n`);
+  assert.equal(hook('gate-stop', project, { transcript_path }).decision, 'block');
 });
 
 test('session-resume summarizes unfinished runs unless minimal', async t => {

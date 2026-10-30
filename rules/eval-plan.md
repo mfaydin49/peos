@@ -13,7 +13,8 @@ Blocking (`high` or `critical`):
 - The plan contradicts the spec, a non-goal, or existing project contracts it names.
 - A named file, module or API does not exist and the plan does not create it.
 
-Non-blocking (`medium` or `low`): a step that could be merged or removed, an
+Non-blocking (`medium` or `low`): more steps than the change needs (a standard run
+rarely needs more than 6), a step that could be merged or removed, an
 abstraction without an established need, a risk without mitigation, a step touching
 more than about 8 files or covering several concerns, restructuring in a feature plan
 beyond what the change needs, new code for something the code map shows already

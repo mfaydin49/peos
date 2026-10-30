@@ -9,12 +9,14 @@ Projects retain their architecture, technology, design system, domain policy,
 check commands, budgets, approvals, task records and decisions. The toolkit supplies
 routing, four focused stage skills, rule documents, project and run templates, schemas,
 and four local scripts. It is also a Claude Code plugin preview (below) with entry
-skills, seven agents (spec, plan, implementation and four evaluators) and hooks that
+skills, nine agents (project profile, investigation, spec, plan, implementation and four evaluators) and hooks that
 protect run state and human gate decisions. The direction is specified in the [v2 design](docs/design/peos-v2-plugin.md);
 increments 1–5 are implemented: request → spec → plan → implementation →
 checks → independent code and security evaluation → release stage, with extra
 behavior-preservation rules for refactor runs and deterministic quality guardrails
-(floor guard, shortcut markers, code map).
+(floor guard, shortcut markers, code map). `/peos:init` (also run automatically by
+`/peos:start`) writes the check configuration from the project's manifests, a project
+profile for the agents, and `AGENTS.md` when the project has none.
 
 The shared authorization policy lets already-approved project-local implementation,
 tests, browser/simulator checks, project start/stop, and agreed local database work
@@ -29,7 +31,7 @@ Host sandbox and device trust prompts remain independent.
 ## Claude Code plugin (preview)
 
 This directory is also a Claude Code plugin (`peos`) and a local marketplace. It adds
-`/peos:start`, `/peos:continue`, `/peos:status`, `/peos:approve`, `/peos:revise` and `/peos:retry`,
+`/peos:init`, `/peos:start`, `/peos:continue`, `/peos:status`, `/peos:approve`, `/peos:revise` and `/peos:retry`,
 which drive a run through spec, plan, implementation, recorded checks and independent
 code and security evaluation, with human gates, up to the release stage. The release
 report and PR flow arrive in increment 6; see the [v2 design](docs/design/peos-v2-plugin.md). Try it for one session without installing:

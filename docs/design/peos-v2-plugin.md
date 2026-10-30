@@ -216,10 +216,12 @@ loads only the rules it needs.
 
 | Agent | Role | Tools | Model | Writes |
 | --- | --- | --- | --- | --- |
-| `spec-writer` | idea/request → spec, asks only consequential questions | Read, Grep, Glob | strongest | no (returns content) |
+| `profiler` | project → `.project-os/project-profile.md` (facts agents need first); drafts `AGENTS.md` when missing | Read, Grep, Glob | mid | no (returns content) |
+| `investigator` | request → affected code, current behavior, root cause (fix), size and trust-boundary signals for classification | Read, Grep, Glob | mid | no |
+| `spec-writer` | idea/request → spec; records reversible defaults as decisions, asks only user-level choices in one round | Read, Grep, Glob | strongest | no (returns content) |
 | `architect` | platform, stack, data model, components, ADR proposals | Read, Grep, Glob, docs lookup | strongest | no |
 | `planner` | spec → ordered steps with files, AC coverage, tests | Read, Grep, Glob | strongest | no |
-| `implementer` | one plan step: code + tests, targeted verify | Read, Grep, Glob, Edit, Write, Bash | mid | **yes** (project code only) |
+| `implementer` | plan steps in order (one agent per batch, not per step): code + tests, targeted verify | Read, Grep, Glob, Edit, Write, Bash | mid | **yes** (project code only) |
 | `eval-spec` | spec quality | Read, Grep, Glob | mid | no |
 | `eval-plan` | plan/architecture quality | Read, Grep, Glob | strongest | no |
 | `eval-code` | `focus`: `acceptance` \| `quality` \| `tests` \| `all` | Read, Grep, Glob | mid | no |
@@ -307,6 +309,7 @@ API calls, cryptography, secrets/credentials, dependency manifests.
 | `architecture.md` | large | orchestrator from `architect` | commit |
 | `plan.md` | standard, large | orchestrator from `planner` | commit |
 | `summary.md` | all | orchestrator | commit (becomes PR body) |
+| `usage.json` | all | `usage-record` hook (token use per session) | ignore |
 | `state.json` | all | `peos-run` script only | ignore |
 | `checks.json` | all | `peos-run record-checks` (runs `verify`) | ignore |
 | `evals/<key>.json` | all | `peos-run record-eval` from the evaluator's report | ignore |
@@ -315,6 +318,20 @@ API calls, cryptography, secrets/credentials, dependency manifests.
 `pending-eval.json`, where the orchestrator places an evaluator's report before
 `record-eval` reads it. Run files are
 read and written only as regular files inside real directories; symlinks are refused.
+
+### 10.1a Project files
+
+| File | Writer | When |
+| --- | --- | --- |
+| `.project-os/engineering.config.json` | `peos-run setup`, from the project's manifests only | missing at `/peos:init` or a new run; never overwritten |
+| `.project-os/project-profile.md` | orchestrator from `profiler`; first line records the commit | missing, or stale (≥ 25 changed files or a manifest change since that commit) |
+| `AGENTS.md` | orchestrator from `profiler` | missing; never overwritten |
+| `CLAUDE.md` (`@AGENTS.md`) | orchestrator | created together with `AGENTS.md` when also missing, so Claude Code loads it |
+
+Created files stay uncommitted for the user to review. The configuration is derived
+by a script, not written by a model, so the commands `record-checks` runs are the
+project's declared ones; the user decided (2026-10-30) that writing it needs no
+approval.
 
 Durable decisions are copied to `docs/decisions/NNN-<slug>.md` using the existing
 decision template. Small implementation choices are not recorded.
@@ -415,7 +432,8 @@ side-effect-free except where stated.
 | `approval-capture` | UserPromptSubmit | When the whole prompt is `/peos:approve <gate> [run]`, `/peos:revise <gate> [--run <name>] …` or `/peos:retry <key> [run]` writes `.project-os/runs/.grant.json` (action, target, run, time, source `user-prompt`), bound to the named run (it must resolve) or else the most recently updated unfinished run. | all |
 | `state-guard` | PreToolUse (Edit, Write, MultiEdit, NotebookEdit, Bash) | Allowlist: under `.project-os/runs/` write tools may change only `<run>/{task,idea,spec,architecture,plan,summary}.md` and `<run>/pending-eval.json` (case-insensitive; paths canonicalized through symlinks and letter case). A Bash command that touches `.project-os` by text or working directory is allowed only as a plain call (no shell operators) of this plugin's own `peos-run.mjs`, and never its `grant` action, however quoted. PEOS agents (`agent_type` `peos:eval-*`, `peos:spec-writer`, `peos:planner`) get no write tool or Bash. | all |
 | `release-guard` | PreToolUse (Bash) | Denies configured deploy/publish/push-to-protected commands unless the release report is READY for the current code state; never grants approval itself. | standard, strict |
-| `gate-stop` | Stop | Only for the session whose transcript names the run: if the most recently updated unfinished run is at an unapproved gate stage whose artifact was written within the hour and has no evaluation of its current content, blocks once (marker `.stop-block` per artifact hash, and `stop_hook_active`). | standard, strict |
+| `gate-stop` | Stop | Only for a session that ran `peos-run` for the run itself (`--run`/`--name` in its own Bash calls; mentions in context or listings do not count): if the most recently updated unfinished run of that session is at an unapproved gate stage whose artifact was written within the hour and has no evaluation of its current content, blocks once (marker `.stop-block` per artifact hash, and `stop_hook_active`). Does not block while the gate's evaluator, launched in the background after the artifact was written, has not handed back yet; a foreground result counts as finished. Transcripts above 64 MiB are skipped. | standard, strict |
+| `usage-record` | Stop | For the most recently updated unfinished run the session ran `peos-run` for: merges the session's model calls since the run began (main and subagent transcripts, keyed by message id so resumed and forked copies count once; skipped above 64 MiB) into `<run>/usage.json`, without the state lock; at the release stage only for 15 minutes after the last state change. Never blocks. | standard, strict |
 | `session-resume` | SessionStart | Adds one line per unfinished run (up to three): stage and next gate. | standard, strict |
 | `fact-gate` (optional) | PreToolUse (Edit) | ECC GateGuard idea: first edit of a file requires listing its importers/contracts. Off by default; evaluated before enabling. | strict |
 
@@ -525,8 +543,10 @@ it never applies settings or creates remote resources without explicit approval.
 - UI verification method (browser, simulator/emulator, desktop automation);
 - performance budget template.
 
-`/peos:init` detects the platform, proposes a configuration from the profile and
-writes it only after the user confirms.
+`/peos:init` detects the platform and writes the configuration from the project's
+manifests without asking (decided 2026-10-30); since increment 5e it also writes the
+project profile and `AGENTS.md` when missing (§10.1a). Permission rules and CI
+templates remain increment 6.
 
 ## 17. Implementation increments
 
@@ -541,6 +561,8 @@ Each increment is independently usable and verified before the next.
 | 5 | Implementer + `eval-code` + `eval-security` + triggers; `peos-run changes`; config binding | structure and scripts **done 2026-10-29** (tests for diff, triggers, config binding, implementer guard); model-driven on the fixture (2026-10-29, $0.97, 24 turns): `/peos:continue` ran `implementer` for S1 and S2, recorded full task checks (17 tests PASS), ran `eval-code` (PASS, 12/12 criteria; no security trigger matched) and reached the release stage with `summary.md`, changes left uncommitted; behavior verified independently. Seeded-defect run (2026-10-30, $1.24): an `export` command implemented without the overwrite and working-directory rules of its acceptance criteria, with a happy-path test only (all checks PASS). Round 1: `eval-code` and `eval-security` both FAILed with high findings for both defects (and the missing tests); `implementer` fixed them; checks re-recorded (22 tests); round 2 both PASS; release stage reached; behavior verified independently. Found and fixed: a 300-character `notAssessed` limit unknown to evaluators, and the orchestrator ending its turn while waiting for a re-sent report |
 | 5b | Refactor support: `record-baseline`, `modifiedTests`, refactor rubric, template and agent notes | **done 2026-10-30**: tests for baseline binding to the start state, release rule, modified-test listing (moves, snapshots, layouts), resume flag; reviewed once; not yet exercised by a model |
 | 5c | Quality guardrails: floor guard flags and `shortcut:` markers in `changes`; `peos-run map`; least-new-code ladder and never-cut list; finding rule; planning size heuristics; security items and `llm` trigger | **done 2026-10-30**: tests for every flag kind with negative cases (identifiers, prose, test titles, dependency versions, keyboard shortcuts), CLI and quoted thresholds, section paths across type changes, markers, map shortening and ordering, `llm` trigger; reviewed twice. Model-driven on the fixture (2026-10-30): a seeded `test.skip` hiding a case-sensitivity bug was flagged `test-made-easier`; `eval-code` confirmed it (high), the implementer removed the skip and fixed the bug, a further unmet criterion was found and fixed, PASS in round 3 with the `shortcut:` marker treated as a decision and listed in `summary.md` ($1.34); a fresh small `/peos:start` request ran map → implementer (read `map.md`) → checks → `eval-code` PASS with no floor flags ($0.76) |
+| 5d | Field-trial tuning (first real project, a `fix`/`standard` production error, 40 min, 5 questions, 17 agent launches, 3 false `gate-stop` blocks): one question round per stage with options and agent defaults recorded as decisions; `fix` intake collects evidence first; one implementer per step batch; `gate-stop` waits for a background evaluator; no reads of secret files | **done 2026-10-30**: `gate-stop` tests for a background evaluator (running, other agent, handed back but unrecorded); not yet exercised by a model |
+| 5e | Cost and setup (the field trial used 13.2M tokens, 78% in the orchestrator's growing context): `investigator` replaces the orchestrator's own code reading; `peos-run setup` and `/peos:init` (configuration from manifests, project profile with freshness, `AGENTS.md`/`CLAUDE.md` when missing); every agent starts from the profile; trust-boundary tier rule; spec and plan size limits; `usage-record` hook and `usage` in `status` against tier budgets | **done 2026-10-30**: tests for detection (package managers, placeholder scripts, linter-only `pyproject.toml`, Go, nothing found), no overwrite, profile freshness (including a kept code fence), usage de-duplication across subagents and copies, run attribution from the session's own `peos-run` calls (prefix names, mentions only), foreground versus background evaluators; reviewed once (3 high, 3 medium, 3 low findings fixed); not yet exercised by a model |
 | 6 | Release: `release-guard`, release report, CI/permission templates in `/peos:init` | deploy command denied without READY; template reviewed |
 | 7 | Large tier: idea, architect, milestones, `eval-performance`, `web`/`ios`/`android` profiles | a small app built end-to-end on web, iOS and Android |
 | 8 | Reference evaluation: 3 reference tasks, usage and defect-catch measurements | report of cost per tier and evaluator usefulness; tuning decisions recorded |
