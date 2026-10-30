@@ -1,6 +1,6 @@
 {
   "name": "peos",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "description": "Personal Engineering OS: gated, evidence-based pipeline from idea to release-ready change, with independent evaluators.",
   "author": {
     "name": "mfaydin49"
@@ -10,5 +10,13 @@
     "planning",
     "evaluation",
     "gates"
-  ]
+  ],
+  "userConfig": {
+    "hook_profile": {
+      "type": "string",
+      "title": "PEOS hook profile",
+      "description": "minimal keeps only the decision and state guards; standard (default) also blocks stopping before an evaluation and summarizes unfinished runs at session start; strict is reserved for stricter checks.",
+      "default": "standard"
+    }
+  }
 }

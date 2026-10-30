@@ -9,5 +9,7 @@ export const runActions = {
   revise: ['project', 'run', 'gate'],
   'reset-eval': ['project', 'run', 'key'],
   advance: ['project', 'run', 'to'],
-  step: ['project', 'run', 'step', 'status']
+  step: ['project', 'run', 'step', 'status'],
+  grant: ['project', 'action', 'target', 'run'],
+  changes: ['project', 'run']
 };

@@ -53,7 +53,7 @@ export function validateEvalReport(input) {
     for (const field of ['problem', 'impact', 'fix']) text(entry[field], `${where}.${field}`, 500);
   }
   if (!Array.isArray(input.notAssessed)) invalid('notAssessed', 'expected an array');
-  for (const [index, entry] of input.notAssessed.entries()) text(entry, `notAssessed[${index}]`, 300);
+  for (const [index, entry] of input.notAssessed.entries()) text(entry, `notAssessed[${index}]`, 500);
   if (input.verdict === 'PASS') {
     if (input.findings.some(entry => ['critical', 'high'].includes(entry.severity))) invalid('verdict', 'PASS cannot coexist with a critical or high finding');
     if (input.criteria.some(entry => entry.status === 'not_met')) invalid('verdict', 'PASS cannot coexist with an unmet criterion');

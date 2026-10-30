@@ -6,7 +6,16 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { check, config, git, jsonCli, repository, saveConfig } from './helpers.mjs';
 
-const run = (project, action, args = []) => jsonCli('peos-run.mjs', [action, '--project', project, ...args]);
+const cliRun = (project, action, args = []) => jsonCli('peos-run.mjs', [action, '--project', project, ...args]);
+// Decisions need the user's grant; these tests record one through the CLI first (the hook path is tested separately).
+const decisions = { approve: '--gate', revise: '--gate', 'reset-eval': '--key' };
+function run(project, action, args = []) {
+  if (decisions[action]) {
+    const option = value => args[args.indexOf(value) + 1];
+    cliRun(project, 'grant', ['--action', action, '--target', option(decisions[action]), '--run', option('--run')]);
+  }
+  return cliRun(project, action, args);
+}
 const sha = text => createHash('sha256').update(text).digest('hex');
 const runDir = (project, name) => resolve(project, '.project-os/runs', name);
 async function start(t, tier = 'standard', checks = [check()]) {
@@ -37,7 +46,8 @@ test('init creates validated state, run-local ignore rules and tier gates', asyn
   assert.match(name, /^\d{4}-\d{2}-\d{2}-avatar-upload$/);
   assert.deepEqual(Object.keys(state.gates), ['spec', 'architecture', 'plan']);
   assert.equal(state.stage, 'intake');
-  assert.match(await readFile(resolve(dir, '.gitignore'), 'utf8'), /state\.json\n.*checks\.json\nevals\//s);
+  const ignored = (await readFile(resolve(dir, '.gitignore'), 'utf8')).split('\n');
+  for (const entry of ['state.json', 'checks.json', 'changes.diff', 'evals/', 'pending-eval.json']) assert.ok(ignored.includes(entry), entry);
   assert.equal(run(project, 'init', ['--name', 'avatar-upload', '--type', 'feature', '--tier', 'small']).report.error.code, 'RUN_EXISTS');
   assert.equal(run(project, 'init', ['--name', 'habit', '--type', 'app', '--tier', 'standard']).report.error.code, 'INVOCATION');
   assert.equal(run(project, 'init', ['--name', '../x', '--type', 'fix', '--tier', 'small']).report.error.code, 'INVOCATION');
@@ -128,6 +138,7 @@ test('release requires full PASS checks and PASS code evaluations for the curren
 
 test('record-checks propagates failures and partial verification never satisfies release', async t => {
   const { project, name } = await start(t, 'trivial', [check('pass'), check('broken', 'process.exit(3)')]);
+  run(project, 'advance', ['--run', name, '--to', 'implement']);
   const failed = run(project, 'record-checks', ['--run', name, '--phase', 'task']);
   assert.equal(failed.status, 1); assert.equal(failed.report.checks.status, 'FAIL');
   const partial = run(project, 'record-checks', ['--run', name, '--phase', 'task', '--checks', '["pass"]']);
@@ -166,6 +177,7 @@ test('re-approving an earlier gate reopens later gates instead of reviving them'
 
 test('release needs a code evaluation, and large runs need every code focus', async t => {
   const small = await start(t, 'small');
+  run(small.project, 'advance', ['--run', small.name, '--to', 'implement']);
   run(small.project, 'record-checks', ['--run', small.name, '--phase', 'task']);
   const codeState = run(small.project, 'fingerprint').report.codeState;
   await submit(t, small.project, small.name, { evaluator: 'security', verdict: 'PASS', subject: codeState });
@@ -174,6 +186,7 @@ test('release needs a code evaluation, and large runs need every code focus', as
   await approveArtifact(t, large.project, large.name, 'spec', 'spec');
   await approveArtifact(t, large.project, large.name, 'architecture', 'architecture');
   await approveArtifact(t, large.project, large.name, 'plan', 'plan');
+  run(large.project, 'advance', ['--run', large.name, '--to', 'implement']);
   run(large.project, 'record-checks', ['--run', large.name, '--phase', 'task']);
   const subject = run(large.project, 'fingerprint').report.codeState;
   await submit(t, large.project, large.name, { evaluator: 'code', focus: 'all', verdict: 'PASS', subject });
@@ -280,4 +293,86 @@ test('short run names resolve uniquely and the last failed round is flagged', as
   const flags = [];
   for (let round = 0; round < 3; round++) flags.push((await submit(t, project, name, fail)).report.limitReached);
   assert.deepEqual(flags, [false, false, true]);
+});
+
+test('changes writes the run diff and reports deterministic security triggers', async t => {
+  const { project, name, dir } = await start(t, 'small');
+  assert.equal(run(project, 'changes', ['--run', name]).report.error.code, 'TRANSITION', 'needs the implement binding');
+  run(project, 'advance', ['--run', name, '--to', 'implement']);
+  let report = run(project, 'changes', ['--run', name]).report;
+  assert.deepEqual(report.securityTriggers, []);
+  await writeFile(resolve(project, 'base.txt'), 'base\nconst token = jwt.sign(payload, secret);\n');
+  await writeFile(resolve(project, 'reader.js'), "import fs from 'node:fs';\nexport const read = () => fs.readFileSync(process.argv[2]);\n");
+  await writeFile(resolve(dir, 'notes.md'), 'jwt.sign in run files is ignored');
+  report = run(project, 'changes', ['--run', name]).report;
+  // The fixture's untracked configuration is a change too; only run files are excluded.
+  assert.deepEqual(report.files.map(file => [file.status, file.path]), [['M', 'base.txt'], ['?', '.project-os/engineering.config.json'], ['?', 'reader.js']]);
+  assert.deepEqual(report.securityTriggers, ['authentication', 'cryptography', 'file-system', 'secrets', 'user-input']);
+  const diff = await readFile(report.diffPath, 'utf8');
+  assert.match(diff, /\+const token = jwt\.sign/);
+  assert.match(diff, /\+\+\+ b\/"reader\.js" \(untracked\)/);
+  assert.doesNotMatch(diff, /notes\.md/);
+  assert.equal(report.codeState, run(project, 'fingerprint').report.codeState);
+});
+
+test('recorded checks must use the configuration in force when implementation started', async t => {
+  const { project, name } = await start(t, 'small');
+  assert.equal(run(project, 'advance', ['--run', name, '--to', 'implement']).report.stage, 'implement');
+  const started = run(project, 'status', ['--run', name]).report.state.configHash;
+  assert.match(started, /^sha256:/);
+  await saveConfig(project, config([check('weakened', 'process.exit(0)')]));
+  run(project, 'record-checks', ['--run', name, '--phase', 'task']);
+  await submit(t, project, name, { evaluator: 'code', focus: 'all', verdict: 'PASS', subject: run(project, 'fingerprint').report.codeState });
+  assert.match(run(project, 'advance', ['--run', name, '--to', 'release']).report.error.message, /configuration this run started/);
+  run(project, 'advance', ['--run', name, '--to', 'implement']);
+  assert.equal(run(project, 'status', ['--run', name]).report.state.configHash, started, 're-entering implement keeps the original binding');
+});
+
+test('changes reads only regular untracked text, scans non-test code, and diffs against the run base', async t => {
+  const { project, name } = await start(t, 'small');
+  run(project, 'advance', ['--run', name, '--to', 'implement']);
+  const outside = await mkdtemp(resolve(tmpdir(), 'peos-outside-'));
+  t.after(() => rm(outside, { recursive: true, force: true }));
+  await writeFile(resolve(outside, 'secret.txt'), 'OUTSIDE_SECRET');
+  await symlink(resolve(outside, 'secret.txt'), resolve(project, 'link.txt'));
+  await writeFile(resolve(project, 'blob.bin'), Buffer.from([1, 0, 2, 3]));
+  await writeFile(resolve(project, 'author.js'), 'export const author = "Ada";\n');
+  await mkdir(resolve(project, 'test'));
+  await writeFile(resolve(project, 'test/io.test.js'), "import fs from 'node:fs';\nfs.writeFileSync('x', 'y');\n");
+  let report = run(project, 'changes', ['--run', name]).report;
+  let diff = await readFile(report.diffPath, 'utf8');
+  assert.doesNotMatch(diff, /OUTSIDE_SECRET/);
+  assert.match(diff, /symlink -> /);
+  assert.match(diff, /binary file, 4 bytes/);
+  assert.deepEqual(report.securityTriggers, [], 'author is not authentication; test-file I/O is not a trigger');
+  await writeFile(resolve(project, 'run.py'), 'import subprocess, sys\nsubprocess.run(sys.argv[1:])\n');
+  assert.deepEqual(run(project, 'changes', ['--run', name]).report.securityTriggers, ['code-execution', 'user-input']);
+  // A commit during the run stays visible: the diff base is the commit the run started from.
+  git(project, 'add', 'author.js');
+  git(project, 'commit', '-m', 'step one');
+  report = run(project, 'changes', ['--run', name]).report;
+  assert.ok(report.files.some(file => file.path === 'author.js' && file.status === 'A'), 'committed step is still in the diff');
+});
+
+test('implementation needs a configuration and later stages need the implement binding', async t => {
+  const project = await repository(t);
+  const { report } = run(project, 'init', ['--name', 'nocfg', '--type', 'fix', '--tier', 'small']);
+  assert.equal(run(project, 'advance', ['--run', report.run, '--to', 'verify']).report.error.code, 'TRANSITION');
+  assert.equal(run(project, 'advance', ['--run', report.run, '--to', 'implement']).report.error.code, 'CONFIG_MISSING');
+  await saveConfig(project, config());
+  assert.equal(run(project, 'advance', ['--run', report.run, '--to', 'implement']).report.stage, 'implement');
+  assert.equal(run(project, 'status', ['--run', report.run]).report.state.baseHead, git(project, 'rev-parse', 'HEAD').trim());
+});
+
+test('a sparse checkout does not report out-of-cone files as changes', async t => {
+  const { project, name } = await start(t, 'small');
+  await mkdir(resolve(project, 'other'));
+  await writeFile(resolve(project, 'other/secrets.txt'), 'x');
+  await writeFile(resolve(project, 'other/package.json'), '{}');
+  git(project, 'add', 'other'); git(project, 'commit', '-m', 'other');
+  run(project, 'advance', ['--run', name, '--to', 'implement']);
+  git(project, 'sparse-checkout', 'set', '--no-cone', '/base.txt', '/.project-os/');
+  const report = run(project, 'changes', ['--run', name]).report;
+  assert.deepEqual(report.files.filter(file => file.path.startsWith('other/')), []);
+  assert.deepEqual(report.securityTriggers, []);
 });

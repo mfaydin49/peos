@@ -201,8 +201,8 @@ loads only the rules it needs.
 | `implementer` | one plan step: code + tests, targeted verify | Read, Grep, Glob, Edit, Write, Bash | mid | **yes** (project code only) |
 | `eval-spec` | spec quality | Read, Grep, Glob | mid | no |
 | `eval-plan` | plan/architecture quality | Read, Grep, Glob | strongest | no |
-| `eval-code` | `focus`: `acceptance` \| `quality` \| `tests` \| `all` | Read, Grep, Glob, restricted Bash | mid | no |
-| `eval-security` | security review + scanner results | Read, Grep, Glob, restricted Bash | strongest | no |
+| `eval-code` | `focus`: `acceptance` \| `quality` \| `tests` \| `all` | Read, Grep, Glob | mid | no |
+| `eval-security` | security review + scanner results | Read, Grep, Glob | strongest | no |
 | `eval-performance` | measurements against budgets | Read, restricted Bash, browser/simulator | mid | no |
 
 Notes:
@@ -213,9 +213,14 @@ Notes:
   implementer-written tests are systematically weak.
 - One `eval-code` agent with a `focus` parameter replaces three near-duplicate agents;
   the large tier calls it once per focus, smaller tiers once with `all`.
-- "Restricted Bash" = an allowlist of read-only/scanner commands, enforced by the
-  write-guard hook ([§11](#11-hooks)), which identifies evaluator calls by the
-  `agent_type` field hooks receive inside subagents.
+- Code evaluators get no Bash (decided in increment 5, replacing "restricted Bash"):
+  `peos-run record-checks` runs the configured checks, including scanners of kind
+  `security`, once per code state, and `peos-run changes` writes the diff; evaluators
+  read `checks.json` and `changes.diff`. Plugin agents cannot scope Bash per agent
+  ([§18](#18-host-assumptions) item 15), so no Bash is the only reliable read-only.
+  `eval-performance` (increment 7) will need measurements and is designed then.
+- `implementer` may write project code and run commands but not `.project-os` or
+  `peos-run` (state-guard, by `agent_type`).
 - Every agent lists `Agent` in `disallowedTools` (no nested delegation), and evaluators
   also disallow `Edit`, `Write` and `NotebookEdit`.
 - Model names are configured per agent (`model:`); "strongest/mid" map to the current
@@ -321,6 +326,11 @@ findings `Fn`. Each plan step lists files, covered ACs, tests and dependencies.
 }
 ```
 
+On first entry into `implement` the run also stores `configHash` (the configuration in
+force; entering `implement` without one fails with `CONFIG_MISSING`) and `baseHead`
+(the commit the change starts from; `changes` diffs against it, so commits made during
+the run stay visible to evaluators). Later stages refuse a run without this binding.
+
 Contract: [schemas/state.schema.json](../../schemas/state.schema.json). Writes are
 atomic (fsynced temp file + rename) and serialized by `state.lock`.
 
@@ -381,12 +391,11 @@ side-effect-free except where stated.
 
 | Hook | Event | Behavior | Profile |
 | --- | --- | --- | --- |
-| `approval-capture` | UserPromptSubmit | When the whole prompt is exactly `/peos:approve <gate> <nonce>` or `/peos:revise …`, records the decision for the pending gate with the artifact hash. Second signal for gates; see §12 for why it is not sufficient alone. | all |
-| `state-guard` | PreToolUse (Edit, Write, Bash) | Denies direct writes to `state.json`, `checks.json`, `evals/` and calls to `peos-run` subcommands reserved for hooks. | all |
-| `eval-write-guard` | PreToolUse (Edit, Write, Bash) inside evaluator agents | Denies writes and non-allowlisted commands from `eval-*` agents. | all |
+| `approval-capture` | UserPromptSubmit | When the whole prompt is `/peos:approve <gate> [run]`, `/peos:revise <gate> [--run <name>] …` or `/peos:retry <key> [run]` writes `.project-os/runs/.grant.json` (action, target, run, time, source `user-prompt`), bound to the named run (it must resolve) or else the most recently updated unfinished run. | all |
+| `state-guard` | PreToolUse (Edit, Write, MultiEdit, NotebookEdit, Bash) | Allowlist: under `.project-os/runs/` write tools may change only `<run>/{task,idea,spec,architecture,plan,summary}.md` and `<run>/pending-eval.json` (case-insensitive; paths canonicalized through symlinks and letter case). A Bash command that touches `.project-os` by text or working directory is allowed only as a plain call (no shell operators) of this plugin's own `peos-run.mjs`, and never its `grant` action, however quoted. PEOS agents (`agent_type` `peos:eval-*`, `peos:spec-writer`, `peos:planner`) get no write tool or Bash. | all |
 | `release-guard` | PreToolUse (Bash) | Denies configured deploy/publish/push-to-protected commands unless the release report is READY for the current code state; never grants approval itself. | standard, strict |
-| `gate-stop` | Stop | If an active run is in an automatic stage with unmet gates, blocks once with the missing items; passes when `stop_hook_active` is true to avoid loops. | standard, strict |
-| `session-resume` | SessionStart | Injects a one-line summary of the active run (stage, pending gate). | all |
+| `gate-stop` | Stop | Only for the session whose transcript names the run: if the most recently updated unfinished run is at an unapproved gate stage whose artifact was written within the hour and has no evaluation of its current content, blocks once (marker `.stop-block` per artifact hash, and `stop_hook_active`). | standard, strict |
+| `session-resume` | SessionStart | Adds one line per unfinished run (up to three): stage and next gate. | standard, strict |
 | `fact-gate` (optional) | PreToolUse (Edit) | ECC GateGuard idea: first edit of a file requires listing its importers/contracts. Off by default; evaluated before enabling. | strict |
 
 Profiles (`minimal | standard | strict`) are a plugin user option. `minimal` keeps only
@@ -396,16 +405,47 @@ the guards that protect approvals and state integrity.
 
 | Gate | Enforcement | Strength |
 | --- | --- | --- |
-| spec, architecture, plan | `peos-run approve` is the only command that sets a human gate and sits behind a project `permissions.ask` rule, so the host asks the human before it runs; `state-guard` blocks every other write path; `approval-capture` must also have seen the matching prompt | host-enforced prompt, assuming the `ask` rule holds in the session's permission mode ([§18](#18-host-assumptions)) |
+| spec, architecture, plan | `peos-run approve`/`revise`/`reset-eval` consume a grant that matches action, target and run and is at most 15 minutes old; every attempt claims it atomically (one consumer wins) and consumes it, so a refused approval cannot be reused for an artifact the user has not seen. Inside Claude Code (`CLAUDECODE` set) only `user-prompt` grants count and `peos-run grant` refuses; `state-guard` blocks the model from writing grants or state | hook-enforced against ordinary tool use; see residual risks below. Optional extra: a project `permissions.ask` rule on `peos-run.mjs approve` adds a host prompt |
 | checkpoint commits | approved once at plan approval for the run's branch (`standard`, `large`); `trivial`/`small` runs make no checkpoint commits | workflow guidance + host permission prompt |
 | push / PR | project permission rule `ask` | host-enforced prompt |
 | production deploy | (1) permission `ask` rules for deploy commands, (2) `release-guard`, (3) CI environment protection with required reviewers | (3) is outside the machine and the strongest |
 
-`UserPromptSubmit` alone is not proof of a human decision: the host also fires it for
-scheduled task runs (including `/loop`), background subagent reports and messages
-from other sessions. Hence the exact-prompt-plus-nonce match is combined with the
-host permission prompt, and runs refuse gate approvals while a loop or scheduled
-task drives the session.
+Threat model. The hooks are guard rails against a model taking shortcuts with ordinary
+tool use: editing state or evidence directly, approving its own gates, skipping an
+evaluation. They are not a security boundary against a model that deliberately evades
+them; the same process can always reach the same files somehow. Projects that need a
+real boundary run Claude Code's sandbox and permission rules on top, and keep production
+decisions outside the machine (§12 deploy row).
+
+Residual risks of the grant design, accepted for increment 4 and documented:
+
+- `UserPromptSubmit` also fires for scheduled task runs (including `/loop`), background
+  subagent reports and other sessions' messages. A prompt that is exactly a decision
+  command from such a source would create a grant; wrapped reports and ordinary text
+  do not match. A model that schedules a task whose prompt is `/peos:approve …` could
+  forge one; projects that need more add the `permissions.ask` rule above.
+- Shell inspection is pattern-based. Indirection — a script or environment variable
+  that builds the path itself (`node /tmp/x.mjs`, `NODE_OPTIONS=--require …`) — can
+  write files the guard does not see. Full containment needs the host sandbox.
+- Globs that avoid every recognizable name (e.g. `.p*/r*/*/s*`) are not detected.
+- The model can edit `.project-os/engineering.config.json`, for example to weaken a
+  check. Since increment 5 the run records the configuration's hash when it enters
+  `implement`, and release refuses checks recorded under a different configuration.
+  Editing the configuration before implementation starts is not detected; the user
+  sees it in the change list (`changes`) and the diff.
+- The configuration binding covers `.project-os/engineering.config.json` only. A
+  check that calls a project script (`npm test`) can be weakened through that script
+  (`package.json`, test configuration); the change is in the diff, where `eval-code`
+  (focus `tests`/`quality`) must flag weakened or skipped tests.
+- The main session could edit project code itself instead of the implementer; that
+  keeps evaluator independence procedural, like the next item.
+- The orchestrator relays evaluator reports through `pending-eval.json`, so the main
+  session could substitute its own PASS. Evaluator independence is procedural; the
+  subject check only proves the report names the current artifact or code state.
+- Bash cannot read run files either; the model uses the Read tool or `peos-run status`.
+  A user who wants raw evidence can open the files directly.
+- On hosts without hooks (Codex, a terminal), `peos-run grant` records the decision and
+  gates are instruction-level only.
 
 Policy: agents may open a PR and, if the project configures it, deploy to a staging
 environment. Production deployment happens only through the protected CI environment
@@ -420,7 +460,8 @@ it never applies settings or creates remote resources without explicit approval.
   increments.
 - `verify` runs once per code state; evaluators read `checks.json`. Performance
   evaluation runs alone, after other evaluators, to avoid measurement noise.
-- In `standard` and `large` runs each completed step is a local checkpoint commit on
+- Planned, not yet implemented (increment 5 keeps all changes uncommitted in the working
+  tree for the user to review): in `standard` and `large` runs each completed step is a local checkpoint commit on
   the run branch (never pushed by the agent), so a bad step is reverted without losing
   the run. When the PR is prepared, checkpoints are squashed into one conventional
   commit per run (per milestone for `large`), with `summary.md` as the message body.
@@ -472,8 +513,8 @@ Each increment is independently usable and verified before the next.
 | 1 | Templates and schemas: run templates, `state` and `eval` schemas, config `kind` field | **done 2026-10-29**: schemas compile under Ajv strict and agree with runtime validators; templates in `templates/run/` (referenced from skills in increment 3) |
 | 2 | `peos-run` core: init, status, fingerprint, gate transitions, atomic state, persisted `checks.json` | **done 2026-10-29**: integration tests for transitions, freshness, fingerprint invalidation, round limit, symlink refusal |
 | 3 | Plugin skeleton: manifest, orchestrator skill, `/peos:start|status|continue|approve|revise`, spec/plan agents, `eval-spec`, `eval-plan` | structure **done 2026-10-29** (manifests pass `claude plugin validate`; structural tests); model-driven run on a fixture (2026-10-29, CLI 2.1.128, $0.99): `/peos:start` classified, spawned `spec-writer` and `eval-spec`, recorded PASS and stopped at the spec gate without self-approving; then `/peos:approve spec` ($0.86) approved only that gate, ran `planner` and `eval-plan` (PASS, 12/12 criteria, one low finding), recorded via `pending-eval.json` and stopped at the plan gate without self-approving |
-| 4 | Hooks: `approval-capture`, `state-guard`, `session-resume`, `gate-stop` | tests show the model cannot set a gate; Stop blocks at most once |
-| 5 | Implementer + `eval-code` + `eval-security` + triggers | a `standard` run reaches READY on a fixture; a seeded defect is caught |
+| 4 | Hooks: `approval-capture`, `state-guard`, `session-resume`, `gate-stop`; grants; `/peos:retry` | **done 2026-10-29**: hook scripts tested with host-shaped input, including bypasses found in two security review rounds (quoting, case, working directory, expansion inside quotes, globs, `find`, environment changes, concurrent grant use). Model-driven on the fixture (2026-10-29): a plain-language "approve the plan" request left the gate pending and the model pointed to `/peos:approve plan` ($0.19); typing `/peos:approve plan` created a grant that `approve` consumed, then the run advanced to `implement` ($0.20); SessionStart context and no false denials of the flow's own commands |
+| 5 | Implementer + `eval-code` + `eval-security` + triggers; `peos-run changes`; config binding | structure and scripts **done 2026-10-29** (tests for diff, triggers, config binding, implementer guard); model-driven on the fixture (2026-10-29, $0.97, 24 turns): `/peos:continue` ran `implementer` for S1 and S2, recorded full task checks (17 tests PASS), ran `eval-code` (PASS, 12/12 criteria; no security trigger matched) and reached the release stage with `summary.md`, changes left uncommitted; behavior verified independently. Seeded-defect run (2026-10-30, $1.24): an `export` command implemented without the overwrite and working-directory rules of its acceptance criteria, with a happy-path test only (all checks PASS). Round 1: `eval-code` and `eval-security` both FAILed with high findings for both defects (and the missing tests); `implementer` fixed them; checks re-recorded (22 tests); round 2 both PASS; release stage reached; behavior verified independently. Found and fixed: a 300-character `notAssessed` limit unknown to evaluators, and the orchestrator ending its turn while waiting for a re-sent report |
 | 6 | Release: `release-guard`, release report, CI/permission templates in `/peos:init` | deploy command denied without READY; template reviewed |
 | 7 | Large tier: idea, architect, milestones, `eval-performance`, `web`/`ios`/`android` profiles | a small app built end-to-end on web, iOS and Android |
 | 8 | Reference evaluation: 3 reference tasks, usage and defect-catch measurements | report of cost per tier and evaluator usefulness; tuning decisions recorded |

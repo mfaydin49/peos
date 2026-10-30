@@ -5,9 +5,12 @@ import { fileURLToPath } from 'node:url';
 import { main, parseArgs, projectDirectory, fail, ToolkitError } from './lib/cli.mjs';
 import { validateEvalReport, evalKey } from './lib/eval-report.mjs';
 import { runActions } from './lib/run-actions.mjs';
+import { consumeGrant, insideClaudeCode, writeGrant } from './lib/grants.mjs';
+import { codeChanges } from './lib/changes.mjs';
+import { requireRoot, headCommit } from './lib/git.mjs';
 import {
   runsPath, types, tiers, stages, tierGates, gateArtifacts, gateEvalKeys, runDirectory, runSubdirectory, readRunFile,
-  readState, writeState, writeJsonAtomic, withLock, artifactHash, fingerprint
+  readState, writeState, writeAtomic, writeJsonAtomic, withLock, artifactHash, configHash, fingerprint
 } from './lib/run-state.mjs';
 
 const verifyScript = fileURLToPath(new URL('verify.mjs', import.meta.url));
@@ -55,7 +58,8 @@ async function assess(directory, state, codeState) {
   }
   const report = await readChecks(directory);
   const checks = report && { status: report.status, phase: report.phase, verification: report.verification,
-    fresh: codeState !== null && report.codeState === codeState };
+    fresh: codeState !== null && report.codeState === codeState,
+    configMatches: Object.hasOwn(state, 'configHash') && report.configHash === state.configHash };
   return { gates, evals, checks, artifacts };
 }
 function requireGates(assessment) {
@@ -68,6 +72,7 @@ function requireCodeEvidence(state, assessment, { releasePhase }) {
   if (!checks || !checks.fresh || checks.status !== 'PASS' || checks.verification !== 'full' || (releasePhase && checks.phase !== 'release')) {
     fail('EVIDENCE', `A full PASS ${releasePhase ? 'release-phase ' : ''}verification must be recorded for the current code state.`);
   }
+  if (!checks.configMatches) fail('EVIDENCE', 'The checks were not recorded with the configuration this run started implementation with; the user must review the configuration change (revert it or start a new run).');
   const codeEvals = Object.entries(evals).filter(([key]) => !gateForEval[key]);
   const required = requiredCodeEvals[state.tier] ?? [];
   const missing = required.filter(key => !Object.hasOwn(evals, key));
@@ -87,7 +92,7 @@ async function init(project, options) {
   try { await mkdir(directory); }
   catch (error) { if (error.code === 'EEXIST') fail('RUN_EXISTS', 'A run with this name already exists today.'); throw error; }
   // Evidence and state are working files; committed artifacts are the Markdown documents.
-  await writeFile(resolve(directory, '.gitignore'), 'state.json\nstate.lock\nchecks.json\nevals/\npending-eval.json\n*.tmp-*\n');
+  await writeFile(resolve(directory, '.gitignore'), 'state.json\nstate.lock\nchecks.json\nchanges.diff\nevals/\npending-eval.json\n.stop-block\n*.tmp-*\n');
   const now = new Date().toISOString();
   const state = { schemaVersion: 1, run, type, tier, stage: 'intake',
     gates: Object.fromEntries(tierGates[tier].map(gate => [gate, { status: 'pending' }])),
@@ -132,7 +137,7 @@ async function recordChecks(project, options) {
   const after = await fingerprint(project);
   // Evidence is bound to a code state only if nothing changed while checks ran.
   const stable = before.codeState === after.codeState;
-  const checks = { ...report, codeState: stable ? after.codeState : null,
+  const checks = { ...report, codeState: stable ? after.codeState : null, configHash: await configHash(project),
     ...(stable ? {} : { codeStateNote: 'Code changed while checks ran; this result is not bound to a code state.' }) };
   await writeJsonAtomic(resolve(directory, 'checks.json'), checks);
   return { report: { run: options.run, checks }, exitCode: result.status ?? 1 };
@@ -182,12 +187,13 @@ async function recordEval(project, options) {
     return { run: state.run, key, verdict: report.verdict, round, limitReached: report.verdict !== 'PASS' && round === 3 };
   });
 }
-// Reserved: the plugin wires this behind a project permissions.ask rule so the host asks the human (design §12).
+// Gate decisions consume a grant left by the user's own command (design §12).
 async function approve(project, options) {
   const directory = await runDirectory(project, options.run);
   return withLock(directory, async () => {
     const state = await readState(directory);
     const gate = choice(options.gate, Object.keys(state.gates), 'gate');
+    await consumeGrant(project, 'approve', gate, state.run);
     const assessment = await assess(directory, state, null);
     const earlier = gateOrder.slice(0, gateOrder.indexOf(gate)).filter(name => Object.hasOwn(state.gates, name));
     const open = earlier.filter(name => !assessment.gates[name].fresh);
@@ -217,6 +223,7 @@ async function revise(project, options) {
     const state = await readState(directory);
     if (state.stage === 'done') fail('TRANSITION', 'The run is finished; start a new run instead.');
     const gate = choice(options.gate, Object.keys(state.gates), 'gate');
+    await consumeGrant(project, 'revise', gate, state.run);
     reopenLater(state, gate);
     state.gates[gate] = { status: 'revision_requested' };
     delete state.evals[gateEvalKeys[gate]];
@@ -232,11 +239,34 @@ async function resetEval(project, options) {
   return withLock(directory, async () => {
     const state = await readState(directory);
     if (!Object.hasOwn(state.evals, options.key)) fail('INVOCATION', 'No evaluation with this key is recorded.');
+    await consumeGrant(project, 'reset-eval', options.key, state.run);
     delete state.evals[options.key];
     await rm(resolve(await runSubdirectory(directory, 'evals'), `${options.key}.json`), { force: true });
     await writeState(directory, state);
     return { run: state.run, key: options.key, evals: state.evals };
   });
+}
+// Records a user decision on hosts without the approval-capture hook (Codex, a terminal).
+// Inside Claude Code the state-guard hook denies this action to the model.
+async function grant(project, options) {
+  if (insideClaudeCode()) fail('GRANT', 'Inside Claude Code the user records decisions by typing /peos:approve, /peos:revise or /peos:retry.');
+  const action = choice(options.action, ['approve', 'revise', 'reset-eval'], 'action');
+  if (options.run !== undefined) await runDirectory(project, options.run);
+  return { grant: await writeGrant(project, { action, target: options.target, run: options.run ?? null, source: 'cli' }) };
+}
+// Evaluator input: the net code diff against the run's base commit (excluding run files) and security triggers.
+async function changes(project, options) {
+  const directory = await runDirectory(project, options.run);
+  const state = await readState(directory);
+  if (!state.baseHead) fail('TRANSITION', 'The run has not entered implementation yet.');
+  const before = await fingerprint(project);
+  const { files, securityTriggers, diff, truncated } = await codeChanges(project, state.baseHead);
+  const { codeState } = await fingerprint(project);
+  // The diff must describe exactly the code state evaluators will certify.
+  if (codeState !== before.codeState) fail('UNSTABLE', 'The code changed while the diff was computed; run changes again.');
+  const diffPath = resolve(directory, 'changes.diff');
+  await writeAtomic(diffPath, diff);
+  return { run: state.run, base: state.baseHead, codeState, files, securityTriggers, diffPath, truncated };
 }
 async function advance(project, options) {
   const directory = await runDirectory(project, options.run);
@@ -255,7 +285,18 @@ async function advance(project, options) {
       const codeState = ['release', 'done'].includes(to) ? await currentCodeState(project) : null;
       const assessment = await assess(directory, state, codeState);
       requireGates(assessment);
+      // Later stages need the binding made on entering implement, so it cannot be skipped.
+      if (to !== 'implement' && !Object.hasOwn(state, 'configHash')) fail('TRANSITION', 'Enter the implement stage first.');
       if (['release', 'done'].includes(to)) requireCodeEvidence(state, assessment, { releasePhase: to === 'done' });
+    }
+    // On first entry into implement, bind the run to the configured checks and to the
+    // commit the change starts from (design §12 residual risks).
+    if (to === 'implement' && !Object.hasOwn(state, 'configHash')) {
+      const hash = await configHash(project);
+      if (hash === null) fail('CONFIG_MISSING', 'Implementation needs .project-os/engineering.config.json with the project\'s checks; ask the user to create it.');
+      requireRoot(project);
+      state.configHash = hash;
+      state.baseHead = headCommit(project);
     }
     state.stage = to;
     await writeState(directory, state);
@@ -274,7 +315,7 @@ async function step(project, options) {
   });
 }
 
-const handlers = { init, status, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step,
+const handlers = { init, status, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step, grant, changes,
   fingerprint: project => fingerprint(project) };
 
 await main(async () => {

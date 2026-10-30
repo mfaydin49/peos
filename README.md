@@ -9,8 +9,10 @@ Projects retain their architecture, technology, design system, domain policy,
 check commands, budgets, approvals, task records and decisions. The toolkit supplies
 routing, four focused stage skills, rule documents, project and run templates, schemas,
 and four local scripts. It is also a Claude Code plugin preview (below) with entry
-skills and four spec/plan agents; there are no hooks yet. The direction is specified in
-the [v2 design](docs/design/peos-v2-plugin.md); increments 1–3 are implemented.
+skills, seven agents (spec, plan, implementation and four evaluators) and hooks that
+protect run state and human gate decisions. The direction is specified in the [v2 design](docs/design/peos-v2-plugin.md);
+increments 1–5 are implemented: request → spec → plan → implementation →
+checks → independent code and security evaluation → release stage.
 
 The shared authorization policy lets already-approved project-local implementation,
 tests, browser/simulator checks, project start/stop, and agreed local database work
@@ -25,16 +27,17 @@ Host sandbox and device trust prompts remain independent.
 ## Claude Code plugin (preview)
 
 This directory is also a Claude Code plugin (`peos`) and a local marketplace. It adds
-`/peos:start`, `/peos:continue`, `/peos:status`, `/peos:approve` and `/peos:revise`,
-which drive a run through spec and plan with independent evaluators and human gates.
-Implementation, checks and code evaluation are automated in later increments; see the
-[v2 design](docs/design/peos-v2-plugin.md). Try it for one session without installing:
+`/peos:start`, `/peos:continue`, `/peos:status`, `/peos:approve`, `/peos:revise` and `/peos:retry`,
+which drive a run through spec, plan, implementation, recorded checks and independent
+code and security evaluation, with human gates, up to the release stage. The release
+report and PR flow arrive in increment 6; see the [v2 design](docs/design/peos-v2-plugin.md). Try it for one session without installing:
 
 ```sh
 claude --plugin-dir /path/to/personal-engineering-os
 ```
 
-Gate approval is not yet host-enforced (design increment 4).
+Gate decisions take effect only right after you type the command yourself; see design §12
+for what the hooks do and do not guarantee.
 
 ## Requirements
 

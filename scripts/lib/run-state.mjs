@@ -52,7 +52,9 @@ function plainObject(value, where) {
 export function validateState(input) {
   plainObject(input, 'root');
   const fields = ['schemaVersion', 'run', 'type', 'tier', 'stage', 'gates', 'steps', 'evals', 'checkpoints', 'createdAt', 'updatedAt'];
-  if (Object.keys(input).some(key => !fields.includes(key)) || fields.some(key => !Object.hasOwn(input, key))) invalid('root', 'unknown or missing field');
+  if (Object.keys(input).some(key => !fields.includes(key) && !['configHash', 'baseHead'].includes(key)) || fields.some(key => !Object.hasOwn(input, key))) invalid('root', 'unknown or missing field');
+  if (Object.hasOwn(input, 'configHash') && (typeof input.configHash !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(input.configHash))) invalid('configHash', 'expected sha256:<hex>');
+  if (Object.hasOwn(input, 'baseHead') && (typeof input.baseHead !== 'string' || !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(input.baseHead))) invalid('baseHead', 'expected a commit SHA');
   if (input.schemaVersion !== 1) invalid('schemaVersion', 'expected integer 1');
   if (typeof input.run !== 'string' || input.run.length > 80 || !runPattern.test(input.run)) invalid('run', 'invalid run name');
   if (!types.includes(input.type)) invalid('type', 'unsupported value');
@@ -111,12 +113,15 @@ export async function readState(directory) {
   try { input = JSON.parse(source); } catch { fail('STATE', 'state.json must be valid JSON.'); }
   return validateState(input);
 }
+export function writeJsonAtomic(path, value) {
+  return writeAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
+}
 // Temp file, fsync, rename: readers never observe a partial file, and a crash keeps the old or new version.
-export async function writeJsonAtomic(path, value) {
+export async function writeAtomic(path, text) {
   const temporary = `${path}.tmp-${process.pid}-${randomBytes(4).toString('hex')}`;
   try {
     const handle = await open(temporary, 'wx');
-    try { await handle.writeFile(`${JSON.stringify(value, null, 2)}\n`); await handle.sync(); }
+    try { await handle.writeFile(text); await handle.sync(); }
     finally { await handle.close(); }
     await rename(temporary, path);
   } catch (error) {
@@ -149,6 +154,12 @@ export function sha256File(path) {
     const hash = createHash('sha256');
     createReadStream(path).on('error', reject).on('data', chunk => hash.update(chunk)).on('end', () => resolvePromise(hash.digest('hex')));
   });
+}
+// The configured checks in force; recorded checks must use the configuration the run started with.
+export async function configHash(project) {
+  const path = resolve(project, '.project-os/engineering.config.json');
+  const current = await info(path);
+  return current?.isFile() ? `sha256:${await sha256File(path)}` : null;
 }
 export async function artifactHash(directory, gate) {
   const path = resolve(directory, gateArtifacts[gate]);

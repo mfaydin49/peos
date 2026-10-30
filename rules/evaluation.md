@@ -18,6 +18,8 @@ Return exactly one JSON object as your final message, matching
   when cheap; `low` is informational. Each has a concrete `problem`, `impact` and `fix`.
   `file` is relative to the project root with forward slashes (never absolute, never
   `..`); omit it when not applicable.
+- Text limits: each `evidence`, `problem`, `impact`, `fix` and `notAssessed` entry is
+  non-blank and at most 500 characters; IDs are `AC-<n>` and `F<n>`.
 - Do not withhold PASS to appear rigorous. A clean input gets PASS with no findings.
 - Style preferences, hypothetical future needs and restating the input are not findings.
 

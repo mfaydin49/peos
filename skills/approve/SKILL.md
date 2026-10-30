@@ -13,7 +13,8 @@ recently updated run that is not `done` or `stopped` from `peos-run status`, and
 if several are equally likely. Approve only this gate, once.
 
 1. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/peos-run.mjs" approve --project "${CLAUDE_PROJECT_DIR}" --run <run> --gate <gate> --json`.
-   It refuses unless the gate's evaluation PASSed on the current artifact and earlier
-   gates hold. Report a refusal as is; do not work around it.
+   It refuses unless the user's command was just recorded, the gate's evaluation
+   PASSed on the current artifact and earlier gates hold. Report a refusal as is; do
+   not work around it.
 2. On success, read ${CLAUDE_PLUGIN_ROOT}/skills/orchestrator/SKILL.md and continue
    the run from its Resume section. Stop at the next gate; it needs its own approval.

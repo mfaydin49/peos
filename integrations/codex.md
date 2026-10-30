@@ -239,6 +239,7 @@ node /path/to/personal-engineering-os/scripts/peos-run.mjs approve|revise --proj
 node /path/to/personal-engineering-os/scripts/peos-run.mjs reset-eval --project /path/to/project --run <run> --key code-all
 node /path/to/personal-engineering-os/scripts/peos-run.mjs advance --project /path/to/project --run <run> --to <stage>
 node /path/to/personal-engineering-os/scripts/peos-run.mjs step --project /path/to/project --run <run> --step S1 --status done
+node /path/to/personal-engineering-os/scripts/peos-run.mjs changes --project /path/to/project --run <run>
 ```
 
 - `--run` takes the dated run name or, when unique, the name alone (`AMBIGUOUS`
@@ -254,7 +255,18 @@ node /path/to/personal-engineering-os/scripts/peos-run.mjs step --project /path/
   repository fails with `FINGERPRINT` because its contents cannot be covered;
   `status` then still reports gates, with `codeState: null` and the reason.
 - `record-checks` runs `verify` and binds its report to the fingerprint only if the
-  fingerprint is unchanged after the checks; otherwise `codeState` is `null`.
+  fingerprint is unchanged after the checks; otherwise `codeState` is `null`. It also
+  records the configuration hash. Entering `implement` the first time stores the
+  configuration hash (`CONFIG_MISSING` without one) and `baseHead`; `verify`, `evaluate`,
+  `release` and `done` refuse a run without that binding, and `release`/`done` refuse
+  checks recorded under another configuration.
+- `changes` writes `<run>/changes.diff` (working tree against `baseHead`, so commits
+  made during the run stay visible; untracked and index-flag-hidden files shown in full
+  when they are regular text files, symlinks as links, binaries described; run files
+  excluded; capped at 512 KiB) and returns the changed files with filename categories,
+  `securityTriggers` from path categories and added lines of non-test files, and the
+  current `codeState`. It fails with `UNSTABLE` if the code changed while it ran.
+  Triggers decide whether the security evaluator runs; they are not findings.
 - `record-eval` validates an evaluator report against
   [the eval schema](../schemas/eval-report.schema.json), rejects it when its `subject`
   is not the current artifact hash (spec/plan) or fingerprint (code), and caps
@@ -269,10 +281,15 @@ node /path/to/personal-engineering-os/scripts/peos-run.mjs step --project /path/
   `release` additionally a full PASS `checks.json` (either phase) and PASS code
   evaluations (at least one `code-*`; `large` needs the acceptance, quality and tests
   foci), all for the current fingerprint; to `done` the same with release-phase checks.
-- `approve`, `revise` and `reset-eval` are not yet protected from being invoked by a
-  model (`revise` also restarts evaluation rounds): per the design they must sit
-  behind a project `permissions.ask` rule and the plugin hooks (increment 4). Until
-  then they are workflow guidance, not enforcement.
+- `approve`, `revise` and `reset-eval` consume a user grant: an action, target and
+  optional run recorded at most 15 minutes earlier in `.project-os/runs/.grant.json`;
+  every attempt consumes it. In Claude Code the plugin's hook writes it when the user
+  types `/peos:approve`, `/peos:revise` or `/peos:retry`, and blocks the model from
+  writing it; there, `peos-run grant` refuses and only hook-written grants count.
+  Elsewhere the human records it first:
+  `peos-run grant --project <p> --action approve|revise|reset-eval --target <gate|key> [--run <run>]`.
+  Without hooks this is instruction-level only: nothing stops a model from running it.
+  A grant is claimed atomically, so two concurrent decisions cannot both use it.
 
 ## What is enforced and what is guided
 

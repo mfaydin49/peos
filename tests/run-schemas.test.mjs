@@ -30,7 +30,8 @@ function agree(schema, runtime, input, valid, label) {
 
 test('state schema and runtime validator agree', () => {
   const valid = [state(), state({ tier: 'trivial', gates: {}, steps: {}, evals: {}, checkpoints: [] }),
-    state({ gates: { spec: { status: 'revision_requested' } }, checkpoints: ['c'.repeat(64)] })];
+    state({ gates: { spec: { status: 'revision_requested' } }, checkpoints: ['c'.repeat(64)] }),
+    state({ configHash: `sha256:${hex}`, baseHead: 'd'.repeat(40) })];
   for (const input of valid) agree(stateSchema, validateState, input, true, 'valid state');
   const invalid = {
     'unknown field': state({ extra: 1 }), 'bad run': state({ run: 'avatar' }), 'bad type': state({ type: 'bug' }),
@@ -42,7 +43,9 @@ test('state schema and runtime validator agree', () => {
     'round above limit': state({ evals: { spec: { verdict: 'FAIL', round: 4, subject: `sha256:${hex}` } } }),
     'bad subject': state({ evals: { code: { verdict: 'PASS', round: 1, subject: 'HEAD' } } }),
     'duplicate checkpoint': state({ checkpoints: ['b'.repeat(40), 'b'.repeat(40)] }),
-    'local timestamp': state({ updatedAt: '2026-10-29 10:00' })
+    'local timestamp': state({ updatedAt: '2026-10-29 10:00' }),
+    'bad config hash': state({ configHash: 'md5:x' }), 'null config hash': state({ configHash: null }),
+    'bad base head': state({ baseHead: 'HEAD' })
   };
   for (const [label, input] of Object.entries(invalid)) agree(stateSchema, validateState, input, false, label);
 });
@@ -52,7 +55,8 @@ test('eval report schema and runtime validator agree, including verdict invarian
     report({ evaluator: 'spec', focus: undefined, subject: `sha256:${hex}` }),
     report({ evaluator: 'plan', focus: 'architecture', subject: `sha256:${hex}` }),
     report({ evaluator: 'security', focus: undefined, verdict: 'FAIL', findings: [{ id: 'F1', severity: 'critical', problem: 'p', impact: 'i', fix: 'f' }] }),
-    report({ evaluator: 'performance', focus: undefined, verdict: 'BLOCKED', mode: 'degraded', notAssessed: ['No budgets configured.'] })
+    report({ evaluator: 'performance', focus: undefined, verdict: 'BLOCKED', mode: 'degraded', notAssessed: ['No budgets configured.'] }),
+    report({ notAssessed: ['x'.repeat(500)] })
   ].map(input => JSON.parse(JSON.stringify(input)));
   for (const input of valid) agree(evalSchema, validateEvalReport, input, true, `valid ${input.evaluator}`);
   const invalid = {
@@ -69,7 +73,8 @@ test('eval report schema and runtime validator agree, including verdict invarian
     'blank evidence': report({ criteria: [{ id: 'AC-1', status: 'met', evidence: ' ' }] }),
     'bad criterion id': report({ criteria: [{ id: 'AC1', status: 'met', evidence: 'e' }] }),
     'too many findings': report({ findings: Array.from({ length: 21 }, (_, i) => ({ id: `F${i + 1}`, severity: 'low', problem: 'p', impact: 'i', fix: 'f' })) }),
-    'unknown field': report({ score: 9 }), 'bad evaluator': report({ evaluator: 'style' })
+    'unknown field': report({ score: 9 }), 'bad evaluator': report({ evaluator: 'style' }),
+    'too long gap': report({ notAssessed: ['x'.repeat(501)] })
   };
   for (const [label, input] of Object.entries(invalid)) agree(evalSchema, validateEvalReport, JSON.parse(JSON.stringify(input)), false, label);
 });

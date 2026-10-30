@@ -19,8 +19,10 @@ export async function saveConfig(project, input) {
   await mkdir(resolve(project, '.project-os'), { recursive: true });
   await writeFile(resolve(project, '.project-os/engineering.config.json'), JSON.stringify(input));
 }
+// Tests run the CLI as a terminal user would, even when the suite runs inside Claude Code.
+export const plainEnv = () => Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('CLAUDE')));
 export function cli(name, args, options = {}) {
-  const result = spawnSync(process.execPath, [script(name), ...args], { encoding: 'utf8', timeout: 15000, ...options });
+  const result = spawnSync(process.execPath, [script(name), ...args], { encoding: 'utf8', timeout: 15000, ...options, env: { ...plainEnv(), ...options.env } });
   assert.ifError(result.error);
   return result;
 }

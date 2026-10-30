@@ -46,7 +46,7 @@
     },
     "notAssessed": {
       "type": "array",
-      "items": { "type": "string", "pattern": "\\S", "maxLength": 300 }
+      "items": { "type": "string", "pattern": "\\S", "maxLength": 500 }
     }
   },
   "allOf": [

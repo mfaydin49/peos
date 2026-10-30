@@ -31,16 +31,18 @@ test('plugin and marketplace manifests agree with the package', async () => {
   assert.deepEqual(marketplace.plugins.map(entry => [entry.name, entry.source]), [['peos', './']]);
 });
 
-test('agents are named after their file, cannot delegate, and evaluators cannot write or run commands', async () => {
-  assert.deepEqual(agentFiles.sort(), ['eval-plan.md', 'eval-spec.md', 'planner.md', 'spec-writer.md']);
+test('agents are named after their file, cannot delegate, and only the implementer writes or runs commands', async () => {
+  assert.deepEqual(agentFiles.sort(), ['eval-code.md', 'eval-plan.md', 'eval-security.md', 'eval-spec.md', 'implementer.md', 'planner.md', 'spec-writer.md']);
   for (const name of agentFiles) {
     const { fields } = await document(resolve(toolkit, 'agents', name));
     assert.equal(fields.name, name.replace(/\.md$/, ''));
     assert.ok(fields.description && fields.model, `${name}: description and model`);
     assert.ok(list(fields.disallowedTools).includes('Agent'), `${name}: no nested delegation`);
     const tools = list(fields.tools);
-    // Producers return content to the orchestrator; only the orchestrator writes run files.
-    for (const forbidden of ['Edit', 'Write', 'NotebookEdit', 'Bash', 'Agent']) assert.ok(!tools.includes(forbidden), `${name}: ${forbidden}`);
+    assert.ok(!tools.includes('Agent'), `${name}: Agent`);
+    if (name === 'implementer.md') { assert.deepEqual(tools.sort(), ['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write']); continue; }
+    // Producers and evaluators return content to the orchestrator; only it writes run files.
+    for (const forbidden of ['Edit', 'Write', 'NotebookEdit', 'Bash']) assert.ok(!tools.includes(forbidden), `${name}: ${forbidden}`);
   }
 });
 
@@ -50,7 +52,7 @@ test('skills are named after their directory and gate decisions are user-only', 
     assert.equal(fields.name, name);
     assert.ok(fields.description, `${name}: description`);
   }
-  for (const name of ['start', 'continue', 'approve', 'revise']) {
+  for (const name of ['start', 'continue', 'approve', 'revise', 'retry']) {
     assert.equal((await document(resolve(toolkit, 'skills', name, 'SKILL.md'))).fields['disable-model-invocation'], 'true', name);
   }
   assert.equal((await document(resolve(toolkit, 'skills/orchestrator/SKILL.md'))).fields['user-invocable'], 'false');
@@ -76,7 +78,20 @@ test('plugin paths, Markdown links and peos-run commands referenced by plugin fi
     }
   }
   assert.ok(commands >= 10, 'commands were found and checked');
-  for (const agent of ['spec-writer', 'planner', 'eval-spec', 'eval-plan']) {
+  for (const agent of agentFiles.map(name => name.replace(/\.md$/, ''))) {
     assert.match(await readFile(resolve(toolkit, 'skills/orchestrator/SKILL.md'), 'utf8'), new RegExp(`peos:${agent}`));
   }
+});
+
+test('hooks reference existing scripts and guard every write tool', async () => {
+  const { hooks } = await json('hooks/hooks.json');
+  assert.deepEqual(Object.keys(hooks).sort(), ['PreToolUse', 'SessionStart', 'Stop', 'UserPromptSubmit']);
+  for (const entries of Object.values(hooks)) for (const entry of entries) for (const { type, command } of entry.hooks) {
+    assert.equal(type, 'command');
+    const [, script] = /^node "\$\{CLAUDE_PLUGIN_ROOT\}\/(hooks\/[a-z-]+\.mjs)"$/.exec(command) ?? assert.fail(command);
+    await access(resolve(toolkit, script));
+  }
+  assert.deepEqual(hooks.PreToolUse[0].matcher.split('|').sort(), ['Bash', 'Edit', 'MultiEdit', 'NotebookEdit', 'Write']);
+  const plugin = await json('.claude-plugin/plugin.json');
+  assert.equal(plugin.userConfig.hook_profile.default, 'standard');
 });

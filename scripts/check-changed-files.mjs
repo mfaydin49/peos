@@ -1,17 +1,7 @@
 import { main, parseArgs, projectDirectory, fail } from './lib/cli.mjs';
 import { git, requireRoot, headCommit } from './lib/git.mjs';
+import { categories } from './lib/changes.mjs';
 
-function categories(paths) {
-  const result = new Set();
-  for (const path of paths) {
-    if (/(^|\/)(\.env(?:\..*)?|.*\.(?:pem|key|p12|pfx)|credentials[^/]*|secrets?[^/]*)$/i.test(path)) result.add('potentially-sensitive');
-    if (/(^|\/)(migrations?)(\/|$)/i.test(path) || /migration/i.test(path)) result.add('migration');
-    if (/schema|\.sql$|\.prisma$|\.graphql$/i.test(path)) result.add('schema');
-    if (/(^|\/)(package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|requirements[^/]*\.txt|pyproject\.toml|poetry\.lock|Cargo\.(toml|lock)|go\.(mod|sum)|Gemfile(?:\.lock)?|composer\.(json|lock))$/i.test(path)) result.add('dependency');
-    if (/(^|\/)(\.github|\.agents|\.project-os|scripts|\.husky)(\/|$)|(^|\/)(AGENTS(?:\.override)?\.md|Dockerfile|Makefile|[^/]*config[^/]*)$/i.test(path)) result.add('tooling');
-  }
-  return [...result].sort();
-}
 function parseDiff(raw, layer) {
   const tokens = raw.split('\0');
   tokens.pop();

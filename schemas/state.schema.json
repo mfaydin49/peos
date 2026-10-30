@@ -36,6 +36,14 @@
       "uniqueItems": true,
       "items": { "type": "string", "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$" }
     },
+    "configHash": {
+      "$comment": "Hash of .project-os/engineering.config.json when the run first entered implementation; recorded checks must match it.",
+      "$ref": "#/$defs/artifactHash"
+    },
+    "baseHead": {
+      "$comment": "HEAD when the run first entered implementation; changes are diffed against it.",
+      "type": "string", "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
+    },
     "createdAt": { "$ref": "#/$defs/timestamp" },
     "updatedAt": { "$ref": "#/$defs/timestamp" }
   },
