@@ -52,7 +52,8 @@ function plainObject(value, where) {
 export function validateState(input) {
   plainObject(input, 'root');
   const fields = ['schemaVersion', 'run', 'type', 'tier', 'stage', 'gates', 'steps', 'evals', 'checkpoints', 'createdAt', 'updatedAt'];
-  if (Object.keys(input).some(key => !fields.includes(key) && !['configHash', 'baseHead'].includes(key)) || fields.some(key => !Object.hasOwn(input, key))) invalid('root', 'unknown or missing field');
+  if (Object.keys(input).some(key => !fields.includes(key) && !['configHash', 'baseHead', 'baseCodeState'].includes(key)) || fields.some(key => !Object.hasOwn(input, key))) invalid('root', 'unknown or missing field');
+  if (Object.hasOwn(input, 'baseCodeState') && (typeof input.baseCodeState !== 'string' || !/^fp:[0-9a-f]{64}$/.test(input.baseCodeState))) invalid('baseCodeState', 'expected fp:<hex>');
   if (Object.hasOwn(input, 'configHash') && (typeof input.configHash !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(input.configHash))) invalid('configHash', 'expected sha256:<hex>');
   if (Object.hasOwn(input, 'baseHead') && (typeof input.baseHead !== 'string' || !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(input.baseHead))) invalid('baseHead', 'expected a commit SHA');
   if (input.schemaVersion !== 1) invalid('schemaVersion', 'expected integer 1');

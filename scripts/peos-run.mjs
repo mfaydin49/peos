@@ -33,10 +33,10 @@ async function currentCodeState(project) {
   try { return (await fingerprint(project)).codeState; }
   catch (error) { if (error instanceof ToolkitError && ['NOT_GIT', 'NO_HEAD'].includes(error.code)) return null; throw error; }
 }
-async function readChecks(directory) {
-  const source = await readRunFile(directory, 'checks.json');
+async function readChecks(directory, name = 'checks.json') {
+  const source = await readRunFile(directory, name);
   if (source === null) return null;
-  try { return JSON.parse(source); } catch { fail('STATE', 'checks.json must be valid JSON.'); }
+  try { return JSON.parse(source); } catch { fail('STATE', `${name} must be valid JSON.`); }
 }
 
 // Freshness: a gate holds only while its artifact is unchanged and every earlier gate holds.
@@ -60,7 +60,11 @@ async function assess(directory, state, codeState) {
   const checks = report && { status: report.status, phase: report.phase, verification: report.verification,
     fresh: codeState !== null && report.codeState === codeState,
     configMatches: Object.hasOwn(state, 'configHash') && report.configHash === state.configHash };
-  return { gates, evals, checks, artifacts };
+  const baselineReport = await readChecks(directory, 'baseline-checks.json');
+  const baseline = baselineReport && { status: baselineReport.status, verification: baselineReport.verification,
+    matches: baselineReport.base === state.baseHead && baselineReport.configHash === state.configHash
+      && baselineReport.codeState !== null && baselineReport.codeState === state.baseCodeState };
+  return { gates, evals, checks, baseline, artifacts };
 }
 function requireGates(assessment) {
   const open = Object.entries(assessment.gates).filter(([, gate]) => !gate.fresh).map(([name]) => name);
@@ -73,6 +77,11 @@ function requireCodeEvidence(state, assessment, { releasePhase }) {
     fail('EVIDENCE', `A full PASS ${releasePhase ? 'release-phase ' : ''}verification must be recorded for the current code state.`);
   }
   if (!checks.configMatches) fail('EVIDENCE', 'The checks were not recorded with the configuration this run started implementation with; the user must review the configuration change (revert it or start a new run).');
+  // A refactor must show the same checks passed before any change (design §7).
+  const { baseline } = assessment;
+  if (state.type === 'refactor' && !(baseline && baseline.status === 'PASS' && baseline.verification === 'full' && baseline.matches)) {
+    fail('EVIDENCE', 'A refactor needs a full PASS baseline recorded with record-baseline on the code as it was when implementation started, with this run\'s configuration.');
+  }
   const codeEvals = Object.entries(evals).filter(([key]) => !gateForEval[key]);
   const required = requiredCodeEvals[state.tier] ?? [];
   const missing = required.filter(key => !Object.hasOwn(evals, key));
@@ -92,7 +101,7 @@ async function init(project, options) {
   try { await mkdir(directory); }
   catch (error) { if (error.code === 'EEXIST') fail('RUN_EXISTS', 'A run with this name already exists today.'); throw error; }
   // Evidence and state are working files; committed artifacts are the Markdown documents.
-  await writeFile(resolve(directory, '.gitignore'), 'state.json\nstate.lock\nchecks.json\nchanges.diff\nevals/\npending-eval.json\n.stop-block\n*.tmp-*\n');
+  await writeFile(resolve(directory, '.gitignore'), 'state.json\nstate.lock\nchecks.json\nbaseline-checks.json\nchanges.diff\nevals/\npending-eval.json\n.stop-block\n*.tmp-*\n');
   const now = new Date().toISOString();
   const state = { schemaVersion: 1, run, type, tier, stage: 'intake',
     gates: Object.fromEntries(tierGates[tier].map(gate => [gate, { status: 'pending' }])),
@@ -128,8 +137,28 @@ async function recordChecks(project, options) {
   const directory = await runDirectory(project, options.run);
   await readState(directory);
   choice(options.phase, ['task', 'release'], 'phase');
+  const { checks, exitCode } = await runChecks(project, options.phase, options.checks);
+  await writeJsonAtomic(resolve(directory, 'checks.json'), checks);
+  return { report: { run: options.run, checks }, exitCode };
+}
+// Refactor baseline: the full task-phase checks on the untouched base commit, recorded once
+// after entering implement and before the first code change.
+async function recordBaseline(project, options) {
+  const directory = await runDirectory(project, options.run);
+  const state = await readState(directory);
+  if (!state.baseHead) fail('TRANSITION', 'Enter the implement stage first.');
+  // Exactly the code state the run started implementation from; earlier local edits are part of it.
+  if (!state.baseCodeState || (await fingerprint(project)).codeState !== state.baseCodeState) {
+    fail('BASELINE', 'The baseline must be recorded on the code as it was when implementation started. Restore that state (for example, have the user stash the run\'s changes) and record it again, or start a new run.');
+  }
+  const { checks, exitCode } = await runChecks(project, 'task');
+  const baseline = { ...checks, base: state.baseHead };
+  await writeJsonAtomic(resolve(directory, 'baseline-checks.json'), baseline);
+  return { report: { run: state.run, baseline }, exitCode };
+}
+async function runChecks(project, phase, selection) {
   const before = await fingerprint(project);
-  const args = [verifyScript, '--project', project, '--phase', options.phase, ...(options.checks === undefined ? [] : ['--checks', options.checks]), '--json'];
+  const args = [verifyScript, '--project', project, '--phase', phase, ...(selection === undefined ? [] : ['--checks', selection]), '--json'];
   const result = spawnSync(process.execPath, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
   let report;
   try { report = JSON.parse(result.stdout); } catch { fail('VERIFY', 'The verifier returned no structured report.'); }
@@ -139,8 +168,7 @@ async function recordChecks(project, options) {
   const stable = before.codeState === after.codeState;
   const checks = { ...report, codeState: stable ? after.codeState : null, configHash: await configHash(project),
     ...(stable ? {} : { codeStateNote: 'Code changed while checks ran; this result is not bound to a code state.' }) };
-  await writeJsonAtomic(resolve(directory, 'checks.json'), checks);
-  return { report: { run: options.run, checks }, exitCode: result.status ?? 1 };
+  return { checks, exitCode: result.status ?? 1 };
 }
 const reportLimit = 1024 * 1024;
 async function readStdin() {
@@ -260,13 +288,13 @@ async function changes(project, options) {
   const state = await readState(directory);
   if (!state.baseHead) fail('TRANSITION', 'The run has not entered implementation yet.');
   const before = await fingerprint(project);
-  const { files, securityTriggers, diff, truncated } = await codeChanges(project, state.baseHead);
+  const { files, securityTriggers, modifiedTests, diff, truncated } = await codeChanges(project, state.baseHead);
   const { codeState } = await fingerprint(project);
   // The diff must describe exactly the code state evaluators will certify.
   if (codeState !== before.codeState) fail('UNSTABLE', 'The code changed while the diff was computed; run changes again.');
   const diffPath = resolve(directory, 'changes.diff');
   await writeAtomic(diffPath, diff);
-  return { run: state.run, base: state.baseHead, codeState, files, securityTriggers, diffPath, truncated };
+  return { run: state.run, base: state.baseHead, codeState, files, securityTriggers, modifiedTests, diffPath, truncated };
 }
 async function advance(project, options) {
   const directory = await runDirectory(project, options.run);
@@ -297,6 +325,7 @@ async function advance(project, options) {
       requireRoot(project);
       state.configHash = hash;
       state.baseHead = headCommit(project);
+      state.baseCodeState = (await fingerprint(project)).codeState;
     }
     state.stage = to;
     await writeState(directory, state);
@@ -315,7 +344,7 @@ async function step(project, options) {
   });
 }
 
-const handlers = { init, status, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step, grant, changes,
+const handlers = { init, status, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step, grant, changes, 'record-baseline': recordBaseline,
   fingerprint: project => fingerprint(project) };
 
 await main(async () => {
@@ -324,7 +353,7 @@ await main(async () => {
   const options = parseArgs(rest, actions[action]);
   const project = await projectDirectory(options.project);
   const outcome = await handlers[action](project, options);
-  const { report, exitCode = 0 } = action === 'record-checks' ? outcome : { report: outcome };
+  const { report, exitCode = 0 } = ['record-checks', 'record-baseline'].includes(action) ? outcome : { report: outcome };
   return { report: { reportVersion: 1, kind: 'run-state', action, status: 'PASS', ...report }, exitCode };
 }, report => {
   if (report.action === 'status' && report.runs) return report.runs.length
@@ -334,9 +363,12 @@ await main(async () => {
     `${report.run}: ${report.state.type}/${report.state.tier} at ${report.state.stage}`,
     ...Object.entries(report.assessment.gates).map(([name, gate]) => `gate ${name}: ${gate.status}${gate.status === 'approved' && !gate.fresh ? ' (stale)' : ''}`),
     ...Object.entries(report.assessment.evals).map(([key, evaluation]) => `eval ${key}: ${evaluation.verdict} round ${evaluation.round}${evaluation.fresh ? '' : ' (stale)'}`),
+    ...(report.assessment.baseline ? [`baseline: ${report.assessment.baseline.status} ${report.assessment.baseline.verification}${report.assessment.baseline.matches ? '' : ' (does not match this run)'}`]
+      : report.state.type === 'refactor' ? ['baseline: none recorded (required for a refactor)'] : []),
     report.assessment.checks ? `checks: ${report.assessment.checks.status} ${report.assessment.checks.verification} ${report.assessment.checks.phase}${report.assessment.checks.fresh ? '' : ' (stale)'}` : 'checks: none recorded'
   ].join('\n');
   if (report.action === 'fingerprint') return `${report.codeState} (HEAD ${report.head}, ${report.changedPaths} changed paths)`;
+  if (report.action === 'record-baseline') return `${report.baseline.status}: refactor baseline recorded for ${report.run} at ${report.baseline.base.slice(0, 12)}`;
   if (report.action === 'record-checks') return `${report.checks.status}: checks recorded for ${report.run}${report.checks.codeState ? '' : ` — ${report.checks.codeStateNote}`}`;
   if (report.action === 'record-eval') return `${report.verdict}: ${report.key} round ${report.round} recorded for ${report.run}`;
   if (report.action === 'init') return `Run ${report.run} created at ${JSON.stringify(report.directory)}.`;

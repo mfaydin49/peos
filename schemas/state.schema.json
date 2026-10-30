@@ -40,6 +40,10 @@
       "$comment": "Hash of .project-os/engineering.config.json when the run first entered implementation; recorded checks must match it.",
       "$ref": "#/$defs/artifactHash"
     },
+    "baseCodeState": {
+      "$comment": "Code fingerprint when the run first entered implementation; a refactor baseline must be recorded on exactly this state.",
+      "type": "string", "pattern": "^fp:[0-9a-f]{64}$"
+    },
     "baseHead": {
       "$comment": "HEAD when the run first entered implementation; changes are diffed against it.",
       "type": "string", "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"

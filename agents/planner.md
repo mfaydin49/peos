@@ -22,6 +22,10 @@ Work:
 4. Mark a step `Parallel: yes` only when its files overlap no other parallel step.
 5. Do not introduce dependencies, services, migrations or public APIs the spec does not
    require; if one is unavoidable, say so under Risks as a decision for the user.
+   For a refactor, read the tests that cover the code to change. Where they do not pin
+   its current behavior, make `S1` add characterization tests (passing on the current
+   code) before any structural step; keep every step behavior-preserving and small
+   enough that tests stay green after it.
 6. Keep the template's headings in English; write the content in the output language.
 
 Output exactly one of these, nothing else:

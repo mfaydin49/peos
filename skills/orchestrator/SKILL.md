@@ -120,7 +120,12 @@ approved plan is the user's consent to implement it.
 
 ## 4. Implement
 
-1. `peos-run advance --to implement`.
+1. `peos-run advance --to implement`. For a `refactor` run only, before the first step:
+   `peos-run record-baseline --run <run>` records the full task checks on the untouched
+   code. If it is not `PASS`, stop: the existing checks must be green before a refactor
+   starts; show the user which checks fail. Release refuses a refactor without it. If it
+   refuses with `BASELINE` (code already changed since implementation started), stop and
+   tell the user: restore that state (they can stash the changes) or start a new run.
 2. For each plan step in order (trivial and small runs: `task.md` is both the spec and
    the plan, with step `S1`):
    `peos-run step --run <run> --step <Sn> --status in_progress`; spawn
@@ -147,7 +152,8 @@ approved plan is the user's consent to implement it.
    in this run (every recorded code evaluation must PASS on the final code state).
    Give each the spec (or task) path, the plan path (`task.md` again for trivial and
    small), `diffPath`, `<directory>/checks.json`, the triggers (security only) and
-   the subject. Record each report.
+   the subject. For a `refactor` run, also tell `eval-code` the run type and pass
+   `modifiedTests` from `changes`. Record each report.
 3. If any is `FAIL`: spawn `peos:implementer` with all blocking findings, then return to
    section 5. The code state changes, so every code evaluation recorded so far runs
    again on the new state, plus any newly triggered one. Stop with the step-6 options of section 3 on `limitReached`
@@ -178,7 +184,9 @@ that stage (use the user's feedback on revision); a fresh PASS evaluation awaiti
 approval → remind the user of the approve/revise commands; stage `implement` with steps
 not `done` → section 4 (run its step 1 first; it is safe to repeat and binds older
 runs) from the first unfinished step; stage `verify` → section 5;
-stage `evaluate` → section 6 (stale evaluations run again); stage `release` → report
+stage `evaluate` → section 6 (stale evaluations run again); a refactor without a
+baseline (`status` says so) → record it if no step has changed code yet, otherwise the
+`BASELINE` instruction of section 4.1; stage `release` → report
 the summary. A stale approval (artifact changed after approval) needs a new evaluation
 and approval; explain which artifact changed.
 

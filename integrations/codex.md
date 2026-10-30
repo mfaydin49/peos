@@ -240,6 +240,7 @@ node /path/to/personal-engineering-os/scripts/peos-run.mjs reset-eval --project 
 node /path/to/personal-engineering-os/scripts/peos-run.mjs advance --project /path/to/project --run <run> --to <stage>
 node /path/to/personal-engineering-os/scripts/peos-run.mjs step --project /path/to/project --run <run> --step S1 --status done
 node /path/to/personal-engineering-os/scripts/peos-run.mjs changes --project /path/to/project --run <run>
+node /path/to/personal-engineering-os/scripts/peos-run.mjs record-baseline --project /path/to/project --run <run>   # refactor runs, before any code change
 ```
 
 - `--run` takes the dated run name or, when unique, the name alone (`AMBIGUOUS`
@@ -267,6 +268,15 @@ node /path/to/personal-engineering-os/scripts/peos-run.mjs changes --project /pa
   `securityTriggers` from path categories and added lines of non-test files, and the
   current `codeState`. It fails with `UNSTABLE` if the code changed while it ran.
   Triggers decide whether the security evaluator runs; they are not findings.
+  `modifiedTests` lists existing test files changed or removed since the base.
+- `record-baseline` (refactor runs) records the full task checks as
+  `baseline-checks.json` on exactly the code state the run entered `implement` with
+  (`baseCodeState`; earlier local edits are part of that state). It refuses once the
+  code differs. `release` and `done` refuse a refactor without a full PASS baseline for
+  that state, base commit and configuration. Recovery: restore the state or start a new run.
+- `modifiedTests` covers common test layouts (test directories, `test_*.py`,
+  `*_test.go`, `*Test(s).java|kt|swift`, snapshots, golden files); a test moved without
+  edits is not listed.
 - `record-eval` validates an evaluator report against
   [the eval schema](../schemas/eval-report.schema.json), rejects it when its `subject`
   is not the current artifact hash (spec/plan) or fingerprint (code), and caps

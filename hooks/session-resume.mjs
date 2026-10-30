@@ -1,4 +1,6 @@
 // SessionStart: remind the new session of unfinished runs in one line each.
+import { lstat } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { readInput, projectRoot, profile, activeRuns, emit } from './common.mjs';
 
 try {
@@ -6,10 +8,11 @@ try {
   const project = await projectRoot(input);
   const runs = profile() === 'minimal' || !project ? [] : (await activeRuns(project)).slice(0, 3);
   if (runs.length) {
-    const lines = runs.map(({ state }) => {
+    const lines = await Promise.all(runs.map(async ({ state, directory }) => {
       const pending = Object.entries(state.gates).find(([, gate]) => gate.status !== 'approved')?.[0];
-      return `- ${state.run} (${state.type}/${state.tier}) at ${state.stage}${pending ? `; next gate: ${pending}` : ''}`;
-    });
+      const noBaseline = state.type === 'refactor' && state.baseHead && !(await lstat(resolve(directory, 'baseline-checks.json')).catch(() => null));
+      return `- ${state.run} (${state.type}/${state.tier}) at ${state.stage}${pending ? `; next gate: ${pending}` : ''}${noBaseline ? '; refactor baseline missing' : ''}`;
+    }));
     emit({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext:
       `Unfinished PEOS runs in this project:\n${lines.join('\n')}\nThe user can resume with /peos:continue or inspect with /peos:status. Gate decisions are the user's.` } });
   }

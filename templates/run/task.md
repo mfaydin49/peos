@@ -16,6 +16,9 @@ tier: trivial | small
 <!-- fix only; file:line when known. -->
 
 ## Acceptance criteria
+<!-- refactor: behavior stays the same. Typical criteria: existing tests pass unchanged
+     (only mechanical edits); public API and outputs unchanged; the structural goal
+     (e.g. "module X split into Y and Z; Y does not import Z"); no new dependencies. -->
 - AC-1:
 
 ## Plan

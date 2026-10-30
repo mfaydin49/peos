@@ -376,3 +376,72 @@ test('a sparse checkout does not report out-of-cone files as changes', async t =
   assert.deepEqual(report.files.filter(file => file.path.startsWith('other/')), []);
   assert.deepEqual(report.securityTriggers, []);
 });
+
+test('a refactor needs a green baseline on the untouched base and reports changed existing tests', async t => {
+  const { project, name } = await start(t, 'small');
+  const refactor = run(project, 'init', ['--name', 'split', '--type', 'refactor', '--tier', 'small']).report.run;
+  assert.equal(run(project, 'record-baseline', ['--run', refactor]).report.error.code, 'TRANSITION');
+  await mkdir(resolve(project, 'test'));
+  await writeFile(resolve(project, 'test/base.test.js'), 'assert(true)\n');
+  git(project, 'add', 'test'); git(project, 'commit', '-m', 'tests');
+  run(project, 'advance', ['--run', refactor, '--to', 'implement']);
+  await writeFile(resolve(project, 'base.txt'), 'changed first\n');
+  assert.equal(run(project, 'record-baseline', ['--run', refactor]).report.error.code, 'BASELINE', 'too late: code already changed');
+  await writeFile(resolve(project, 'base.txt'), 'base\n');
+  const baseline = jsonCli('peos-run.mjs', ['record-baseline', '--project', project, '--run', refactor]);
+  assert.equal(baseline.status, 0); assert.equal(baseline.report.baseline.status, 'PASS');
+  await writeFile(resolve(project, 'base.txt'), 'refactored\n');
+  await writeFile(resolve(project, 'test/base.test.js'), 'assert(false)\n');
+  const changes = run(project, 'changes', ['--run', refactor]).report;
+  assert.deepEqual(changes.modifiedTests, ['test/base.test.js']);
+  run(project, 'advance', ['--run', refactor, '--to', 'verify']);
+  run(project, 'record-checks', ['--run', refactor, '--phase', 'task']);
+  run(project, 'advance', ['--run', refactor, '--to', 'evaluate']);
+  await submit(t, project, refactor, { evaluator: 'code', focus: 'all', verdict: 'PASS', subject: changes.codeState });
+  assert.equal(run(project, 'advance', ['--run', refactor, '--to', 'release']).report.stage, 'release');
+  // The same evidence without a baseline is not enough for a refactor; other types never need one.
+  const other = run(project, 'init', ['--name', 'nobase', '--type', 'refactor', '--tier', 'small']).report.run;
+  run(project, 'advance', ['--run', other, '--to', 'implement']);
+  run(project, 'advance', ['--run', other, '--to', 'verify']);
+  run(project, 'record-checks', ['--run', other, '--phase', 'task']);
+  run(project, 'advance', ['--run', other, '--to', 'evaluate']);
+  await submit(t, project, other, { evaluator: 'code', focus: 'all', verdict: 'PASS', subject: run(project, 'fingerprint').report.codeState });
+  assert.match(run(project, 'advance', ['--run', other, '--to', 'release']).report.error.message, /refactor needs a full PASS baseline/);
+  assert.equal(run(project, 'status', ['--run', name]).report.assessment.baseline, null, 'feature runs have no baseline');
+});
+
+test('the refactor baseline binds to the start state, and moved or snapshot tests are classified', async t => {
+  const { project } = await start(t, 'small');
+  await mkdir(resolve(project, 'test'));
+  await writeFile(resolve(project, 'test/a.test.js'), 'a\n'.repeat(20));
+  await writeFile(resolve(project, 'test/b.test.js'), 'b\n'.repeat(20));
+  git(project, 'add', 'test'); git(project, 'commit', '-m', 'tests');
+  await writeFile(resolve(project, '.DS_Store'), 'stray');
+  const refactor = run(project, 'init', ['--name', 'move', '--type', 'refactor', '--tier', 'small']).report.run;
+  run(project, 'advance', ['--run', refactor, '--to', 'implement']);
+  assert.equal(run(project, 'record-baseline', ['--run', refactor]).report.baseline.status, 'PASS', 'pre-existing local files do not block the baseline');
+  await mkdir(resolve(project, 'spec'));
+  git(project, 'mv', 'test/a.test.js', 'spec/a.test.js');
+  git(project, 'mv', 'test/b.test.js', 'spec/b.test.js');
+  await writeFile(resolve(project, 'spec/b.test.js'), 'b\n'.repeat(19) + 'changed\n');
+  await mkdir(resolve(project, 'src/__snapshots__'), { recursive: true });
+  await writeFile(resolve(project, 'src/__snapshots__/view.test.js.snap'), 'new snapshot');
+  git(project, 'add', '-A', 'src');
+  git(project, 'commit', '-m', 'snapshot');
+  await writeFile(resolve(project, 'src/__snapshots__/view.test.js.snap'), 'updated snapshot');
+  const { modifiedTests } = run(project, 'changes', ['--run', refactor]).report;
+  assert.ok(!modifiedTests.includes('test/a.test.js'), 'a pure move is mechanical');
+  assert.ok(modifiedTests.includes('test/b.test.js'), 'a move with edits is listed');
+  await writeFile(resolve(project, 'base.txt'), 'changed\n');
+  assert.equal(run(project, 'record-baseline', ['--run', refactor]).report.error.code, 'BASELINE');
+});
+
+test('test paths cover common layouts', async () => {
+  const { codeChanges } = await import('../scripts/lib/changes.mjs');
+  assert.equal(typeof codeChanges, 'function');
+  const source = await readFile(new URL('../scripts/lib/changes.mjs', import.meta.url), 'utf8');
+  const testPath = new RegExp(/const testPath = \/(.*)\/;/.exec(source)[1]);
+  for (const path of ['pkg/test_foo.py', 'MyAppTests/FooTests.swift', 'app/src/androidTest/X.kt', 'src/FooTest.java', 'src/__snapshots__/a.test.js.snap',
+    'pkg/testdata/out.golden', 'svc/foo_test.go', 'tests/unit.rs', 'spec/models/user_spec.rb', 'web/a.spec.ts']) assert.ok(testPath.test(path), path);
+  for (const path of ['src/contests/score.js', 'src/latest.js', 'docs/testing.md', 'src/attestation.py']) assert.ok(!testPath.test(path), path);
+});

@@ -200,3 +200,13 @@ test('the implementer writes project code but never PEOS state or peos-run', asy
     'git -c user.name=x commit -m x', 'git --no-pager stash', 'npm test && git checkout -- .']) assert.ok(denied(as('Bash', { command })), command);
   for (const command of ['git diff', 'git -C . status', 'git --no-pager log -3', 'git show HEAD:src/todo.js']) assert.equal(as('Bash', { command }), null, command);
 });
+
+test('session-resume flags a refactor that entered implement without a baseline', async t => {
+  const project = await repository(t);
+  await saveConfig(project, config());
+  const { run: name } = run(project, 'init', ['--name', 'split', '--type', 'refactor', '--tier', 'small']);
+  run(project, 'advance', ['--run', name, '--to', 'implement']);
+  assert.match(hook('session-resume', project, {}).hookSpecificOutput.additionalContext, /refactor baseline missing/);
+  run(project, 'record-baseline', ['--run', name]);
+  assert.doesNotMatch(hook('session-resume', project, {}).hookSpecificOutput.additionalContext, /baseline missing/);
+});

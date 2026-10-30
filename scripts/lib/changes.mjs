@@ -28,7 +28,10 @@ const contentTriggers = {
   secrets: /\b(?:api[_-]?keys?|secrets?|private[_-]?keys?|access[_-]?tokens?|client[_-]?secret)\b|BEGIN [A-Z ]*PRIVATE KEY/i,
   'code-execution': /\b(?:child_process|execSync|execFile\w*|exec\s*\(|spawn\s*\(|eval\s*\(|new Function\s*\(|subprocess|os\.system|Popen|exec\.Command|ProcessBuilder|Process\s*\(\)|Runtime\.getRuntime)/
 };
-const testPath = /(?:^|\/)(?:tests?|__tests__|spec|specs)\/|[._-](?:test|spec)\.[a-z0-9]+$/i;
+// Test code and test data across common layouts: directories (tests/, spec/, __tests__/,
+// __snapshots__/, testdata/, androidTest/, FooTests/), file names (foo.test.js, test_foo.py,
+// foo_test.go, FooTest.java, FooTests.swift) and recorded outputs (.snap, .golden).
+const testPath = /(?:^|\/)(?:[Tt]ests?|__tests__|[Ss]pecs?|__snapshots__|testdata|androidTest|[A-Za-z0-9]+Tests?)\/|(?:^|\/)test_[^/]+\.py$|[._-](?:test|spec)\.[A-Za-z0-9]+$|_test\.go$|(?:Test|Tests|Spec)\.(?:java|kt|swift|cs|scala|m)$|\.(?:snap|golden)$/;
 const diffLimit = 512 * 1024;
 const fileLimit = 256 * 1024;
 const exclude = ':(exclude).project-os/runs';
@@ -87,5 +90,14 @@ export async function codeChanges(project, base) {
   for (const [name, pattern] of Object.entries(contentTriggers)) if (pattern.test(added)) triggers.add(name);
   const diff = sections.map(section => section.text).join('\n');
   const truncated = diff.length > diffLimit;
-  return { files, securityTriggers: [...triggers].sort(), diff: truncated ? `${diff.slice(0, diffLimit)}\n… diff truncated at ${diffLimit} bytes; read the files directly.\n` : diff, truncated };
+  // Existing tests changed, retyped or removed since the base: refactors must justify each
+  // one. A test moved without content changes (rename score 100) is not listed.
+  const renamed = list(git(project, ['diff', '--no-ext-diff', '--no-textconv', '-M', '--name-status', '-z', base, '--', '.', exclude]));
+  const pureMoves = new Set();
+  for (let i = 0; i < renamed.length;) {
+    const status = renamed[i++];
+    if (status.startsWith('R') || status.startsWith('C')) { if (status === 'R100') pureMoves.add(renamed[i]); i += 2; } else i += 1;
+  }
+  const modifiedTests = files.filter(file => ['M', 'D', 'T', 'H'].includes(file.status) && testPath.test(file.path) && !pureMoves.has(file.path)).map(file => file.path);
+  return { files, securityTriggers: [...triggers].sort(), modifiedTests, diff: truncated ? `${diff.slice(0, diffLimit)}\n… diff truncated at ${diffLimit} bytes; read the files directly.\n` : diff, truncated };
 }

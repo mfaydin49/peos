@@ -184,9 +184,30 @@ and stops at the gates of the new tier.
 | `feature` | capability does not exist | spec with acceptance criteria |
 | `change` | works, but desired behavior differs | update behavior **and** its existing tests |
 | `fix` | behavior is wrong | reproduce as a failing test, then fix |
-| `refactor` | behavior stays, structure improves | tests green before and after every step; no behavior change |
+| `refactor` | behavior stays, structure improves | tests green before and after every step; no behavior change (enforced below) |
 
 The orchestrator infers the type and states it with the tier; ambiguity is asked once.
+
+Refactor runs get extra rules, and only refactor runs (other types pay nothing):
+
+- After entering `implement` and before any code change, `peos-run record-baseline`
+  records the full task checks on exactly the code state the run entered `implement`
+  with (`baseCodeState`, so pre-existing local files do not block it); it refuses once
+  code has changed. Recovery is restoring that state or starting a new run;
+  `status` and the session-start hook flag a refactor without a baseline. A failing baseline stops the run: the existing
+  checks must be green before restructuring. Release refuses a refactor without a full
+  PASS baseline for the run's base commit and configuration.
+- `changes` lists `modifiedTests`: existing test files changed or removed since the
+  base, across common layouts including snapshots and golden files; pure moves are not
+  listed. `eval-code` treats any change to their assertions, inputs or expected values
+  as blocking; accepted mechanical edits are reported together as one low finding.
+  The baseline covers task-phase checks; release-phase checks still run before `done`.
+- The planner puts characterization tests first where existing tests do not pin the
+  behavior to be preserved; the rubric blocks observable behavior changes the spec does
+  not list.
+- Large refactors and whole-project modernization are split: a discovery run produces
+  a roadmap and decisions, then each step is its own small refactor run (with the large
+  tier, increment 7).
 
 ## 8. Agents
 
@@ -515,6 +536,7 @@ Each increment is independently usable and verified before the next.
 | 3 | Plugin skeleton: manifest, orchestrator skill, `/peos:start|status|continue|approve|revise`, spec/plan agents, `eval-spec`, `eval-plan` | structure **done 2026-10-29** (manifests pass `claude plugin validate`; structural tests); model-driven run on a fixture (2026-10-29, CLI 2.1.128, $0.99): `/peos:start` classified, spawned `spec-writer` and `eval-spec`, recorded PASS and stopped at the spec gate without self-approving; then `/peos:approve spec` ($0.86) approved only that gate, ran `planner` and `eval-plan` (PASS, 12/12 criteria, one low finding), recorded via `pending-eval.json` and stopped at the plan gate without self-approving |
 | 4 | Hooks: `approval-capture`, `state-guard`, `session-resume`, `gate-stop`; grants; `/peos:retry` | **done 2026-10-29**: hook scripts tested with host-shaped input, including bypasses found in two security review rounds (quoting, case, working directory, expansion inside quotes, globs, `find`, environment changes, concurrent grant use). Model-driven on the fixture (2026-10-29): a plain-language "approve the plan" request left the gate pending and the model pointed to `/peos:approve plan` ($0.19); typing `/peos:approve plan` created a grant that `approve` consumed, then the run advanced to `implement` ($0.20); SessionStart context and no false denials of the flow's own commands |
 | 5 | Implementer + `eval-code` + `eval-security` + triggers; `peos-run changes`; config binding | structure and scripts **done 2026-10-29** (tests for diff, triggers, config binding, implementer guard); model-driven on the fixture (2026-10-29, $0.97, 24 turns): `/peos:continue` ran `implementer` for S1 and S2, recorded full task checks (17 tests PASS), ran `eval-code` (PASS, 12/12 criteria; no security trigger matched) and reached the release stage with `summary.md`, changes left uncommitted; behavior verified independently. Seeded-defect run (2026-10-30, $1.24): an `export` command implemented without the overwrite and working-directory rules of its acceptance criteria, with a happy-path test only (all checks PASS). Round 1: `eval-code` and `eval-security` both FAILed with high findings for both defects (and the missing tests); `implementer` fixed them; checks re-recorded (22 tests); round 2 both PASS; release stage reached; behavior verified independently. Found and fixed: a 300-character `notAssessed` limit unknown to evaluators, and the orchestrator ending its turn while waiting for a re-sent report |
+| 5b | Refactor support: `record-baseline`, `modifiedTests`, refactor rubric, template and agent notes | **done 2026-10-30**: tests for baseline binding to the start state, release rule, modified-test listing (moves, snapshots, layouts), resume flag; reviewed once; not yet exercised by a model |
 | 6 | Release: `release-guard`, release report, CI/permission templates in `/peos:init` | deploy command denied without READY; template reviewed |
 | 7 | Large tier: idea, architect, milestones, `eval-performance`, `web`/`ios`/`android` profiles | a small app built end-to-end on web, iOS and Android |
 | 8 | Reference evaluation: 3 reference tasks, usage and defect-catch measurements | report of cost per tier and evaluator usefulness; tuning decisions recorded |

@@ -28,6 +28,9 @@ Work:
 4. Run the project's test command (or the narrowest configured check that covers your
    change) and fix what you broke. Never weaken, skip or delete tests to make them pass.
 5. Do not add dependencies, services, migrations or public APIs the plan does not name.
+   In a refactor, preserve behavior exactly: change existing tests only mechanically
+   (imports, renamed symbols) and never their assertions; characterization tests must
+   pass on the code as it was before your change.
 6. Never touch `.project-os/`, commit, push, or install anything.
 
 Output exactly one of these, nothing else:

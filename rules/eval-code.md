@@ -30,3 +30,17 @@ a bug fix without a regression test. Non-blocking: test naming, helper reuse.
 ## Focus `all`
 
 Apply all three sections and report every criterion in `criteria`.
+
+## Refactor runs
+
+The orchestrator says when the run type is `refactor` and passes `modifiedTests`, the
+existing test files changed or removed since the base commit. In addition to your focus:
+
+Blocking: any observable behavior change (outputs, errors, exit codes, public API,
+persisted formats, performance-relevant algorithms) the spec does not list as intended;
+an existing test whose assertions, inputs or expected values changed or that was removed
+(only mechanical edits such as import paths and renamed symbols are acceptable, and each
+must be visible in the diff); refactored code with no test exercising it when the plan
+called for characterization tests; dead code or compatibility shims left behind without
+a stated reason. If you accept entries of `modifiedTests` as mechanical, report them
+together as one `low` finding listing the files and why, so the user can see them.

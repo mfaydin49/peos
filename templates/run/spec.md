@@ -17,7 +17,9 @@ tier: standard | large
 -
 
 ## Acceptance criteria
-<!-- Observable and measurable. One behavior per criterion. -->
+<!-- Observable and measurable. One behavior per criterion.
+     refactor: state preserved behavior (existing tests pass unchanged, public API and
+     outputs unchanged) plus the measurable structural goal; no new dependencies. -->
 - AC-1:
 
 ## Non-functional requirements
