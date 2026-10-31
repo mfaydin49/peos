@@ -294,6 +294,9 @@ node /path/to/personal-engineering-os/scripts/peos-run.mjs setup --project /path
   previous failed round), so callers need not read the report. A report file named
   `pending-eval-<name>.json` inside the run directory is removed once recorded; a
   rejected one stays. `reset-eval` returns the cleared report's findings as `last`.
+- `status --run` includes `specSize` for standard runs. `record-eval` refuses a spec
+  with more acceptance criteria (lines `- AC-<n>:`) than 10, or 15 for a feature
+  (`SPEC_SIZE`).
 - `status --run` includes `usage` when the Stop hook has recorded `<run>/usage.json`:
   total tokens of the sessions that worked on the run (main transcript and subagents,
   each model call once) against a starting tier budget (trivial 1.5M, small 3M,

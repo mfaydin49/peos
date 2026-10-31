@@ -14,10 +14,8 @@ Blocking (`high` or `critical`):
 - A requirement appears that the request or idea does not support (invented scope).
 - A security, privacy or data-ownership need implied by the request is absent.
 
-Non-blocking (`medium` or `low`): a spec over its size limits (more than 10
-acceptance criteria for a standard fix, change or refactor, more than 15 for a
-standard feature) or restating the same behavior in several criteria, unclear
-wording, missing edge case that a planner would likely still cover, non-functional
+Non-blocking (`medium` or `low`): the same behavior restated in several criteria (the
+criteria count itself is enforced by `peos-run`), unclear wording, missing edge case that a planner would likely still cover, non-functional
 requirement without a number.
 
 Do not judge implementation choices; the spec states what, not how.

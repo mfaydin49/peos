@@ -33,6 +33,10 @@ agents produce and judge. Design reference: ${CLAUDE_PLUGIN_ROOT}/docs/design/pe
   background, say in one line what it is doing and wait for its hand-back; then
   continue from where you were. Do not edit project code yourself; the implementer
   does, so that evaluators judge work they did not write.
+- A spawn that fails because a `peos:*` agent is not found, or an agent reporting it lacks
+  a tool its definition names, means this session loaded an older plugin version. Stop
+  at once: tell the user to start a new session and continue with `/peos:continue`. Do
+  not skip the agent, do its work or copy its output.
 - Keep your own context small: everything you read is read again on every later turn
   of this session. Do not read or search project code yourself; the investigator,
   producers and evaluators do and return short reports. You read the project profile,
@@ -109,11 +113,13 @@ same code twice.
 | Tier | Files touched | New dependency / contract | Design ambiguity |
 | --- | --- | --- | --- |
 | trivial | 1, a few lines | none | none |
-| small | 1 file / function | none | clear after reading code |
-| standard | 2–5 files | internal module | one real choice |
+| small | up to about 5 files, one concern | none | clear after reading code |
+| standard | 2–5 files or more | internal module | one real user-level choice |
 | large | many / new app | external dependency, public API, new platform | several open questions |
 
-The highest signal wins. A change that itself alters a trust boundary makes it at least
+File count alone never makes a run `standard`: a change with no user-level choice and
+no trust-boundary change is `small`, including its tests and docs. The highest signal
+wins. A change that itself alters a trust boundary makes it at least
 `standard`: authentication or authorization, handling of untrusted input, database
 queries, file-system paths from input, a new external call, cryptography, secrets,
 dependency manifests, or a public API. Code that only sits near such a boundary
@@ -168,7 +174,9 @@ For each gated stage, in order `spec`, then `plan`:
 3. On `STATUS: DRAFT`, the producer has written `<directory>/<artifact>`; keep its
    summary lines for step 7 and do not read the artifact yourself.
 4. `peos-run status --run <run>` and take `artifacts.<stage>` as the subject (missing:
-   the producer did not write it; spawn it again once).
+   the producer did not write it; spawn it again once). If `specSize.over` is true,
+   spawn the spec-writer once more to merge criteria down to `specSize.limit`;
+   `record-eval` refuses an oversized spec (`SPEC_SIZE`).
 5. Spawn the evaluator and record its report (see Fixed rules).
 6. `FAIL`: spawn the producer again with the findings; repeat from 3. Stop and ask the
    user when `record-eval` returns `limitReached: true` (third failed round) or

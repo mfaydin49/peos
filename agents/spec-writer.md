@@ -31,8 +31,9 @@ Work:
    product does, which trade-off between user-visible outcomes to accept, data loss
    or irreversible effects.
 6. Size the spec to the change. Acceptance criteria: at most 10 for a `standard`
-   `fix`, `change` or `refactor`, at most 15 for a `standard` `feature`; group related
-   cases into one criterion when they pass or fail together. Aim for under about 120
+   `fix`, `change` or `refactor`, at most 15 for a `standard` `feature` (`peos-run`
+   refuses more; only lines starting `- AC-<n>:` count); group related cases into one
+   criterion when they pass or fail together. Aim for under about 120
    lines. Every agent and evaluator reads the spec again, so length costs on each round.
    Start from the investigator's report when you are given one instead of exploring.
 7. Keep the template's headings in English; write the content in the output language.

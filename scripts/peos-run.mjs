@@ -137,7 +137,7 @@ async function status(project, options) {
   let usage = null;
   try { usage = summarizeUsage(JSON.parse(await readRunFile(directory, usageFile) ?? 'null'), state.tier); } catch { usage = null; }
   // Artifact hashes are what spec and plan evaluators must name as their subject.
-  return { run: state.run, directory, state, codeState, ...(codeStateError ? { codeStateError } : {}), artifacts, assessment, usage };
+  return { run: state.run, directory, state, codeState, ...(codeStateError ? { codeStateError } : {}), artifacts, assessment, usage, specSize: await specSize(directory, state) };
 }
 async function recordChecks(project, options) {
   const directory = await runDirectory(project, options.run);
@@ -191,6 +191,15 @@ async function readStdin() {
 // A report file the evaluator wrote into the run directory is consumed once read, so the
 // next round writes a fresh file.
 const pendingReport = /^pending-eval-[a-z0-9-]+\.json$/;
+// Spec size is counted, not judged: a spec is read again by every agent and round.
+const criteriaLimit = (type, tier) => tier !== 'standard' ? null : type === 'feature' ? 15 : 10;
+async function specSize(directory, state) {
+  const limit = criteriaLimit(state.type, state.tier);
+  const source = limit === null ? null : await readRunFile(directory, 'spec.md');
+  if (source === null) return null;
+  const criteria = (source.match(/^\s*-\s*AC-\d+\s*:/gm) ?? []).length;
+  return { criteria, limit, over: criteria > limit };
+}
 // What the orchestrator needs from a report without reading it: the blocking findings in
 // short form, counts, and whether the blocking findings repeat the previous round's.
 const blocking = report => report.findings.filter(finding => ['critical', 'high'].includes(finding.severity));
@@ -227,6 +236,8 @@ async function recordEval(project, options) {
     const expected = gate ? await artifactHash(directory, gate) : await currentCodeState(project);
     if (expected === null) fail('EVAL_REPORT', gate ? `${gateArtifacts[gate]} is missing.` : 'Code evaluations need a Git working-tree root with a commit.');
     if (report.subject !== expected) fail('STALE', 'The report judged a different artifact or code state than the current one; re-run the evaluator.');
+    const size = key === 'spec' ? await specSize(directory, state) : null;
+    if (size?.over) fail('SPEC_SIZE', `The spec has ${size.criteria} acceptance criteria; this ${state.type}/${state.tier} run allows ${size.limit}. Merge criteria that pass or fail together.`);
     const previous = state.evals[key];
     const round = previous && previous.verdict !== 'PASS' ? previous.round + 1 : 1;
     if (round > 3) fail('ROUND_LIMIT', `${key} failed three rounds; stop and ask the user.`);

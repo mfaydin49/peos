@@ -128,3 +128,20 @@ test('record-eval consumes a report file the evaluator wrote into the run direct
   const reset = run(project, 'reset-eval', ['--run', name, '--key', 'spec']);
   assert.deepEqual(reset.last.blocking.map(finding => finding.problem), ['AC-1 is not observable.'], 'the cleared findings come back');
 });
+
+test('a spec over its criteria limit is reported and refused', async t => {
+  const project = await repository(t);
+  await saveConfig(project, config());
+  const { run: name, directory } = run(project, 'init', ['--name', 'avatar', '--type', 'change', '--tier', 'standard']);
+  run(project, 'advance', ['--run', name, '--to', 'spec']);
+  const spec = count => Array.from({ length: count }, (_, index) => `- AC-${index + 1}: behavior`).join('\n');
+  const record = text => {
+    const subject = `sha256:${createHash('sha256').update(text).digest('hex')}`;
+    return jsonCli('peos-run.mjs', ['record-eval', '--project', project, '--run', name, '--report', '-'], { input: JSON.stringify({ schemaVersion: 1, evaluator: 'spec', verdict: 'PASS', mode: 'full', subject, criteria: [], findings: [], notAssessed: [] }) }).report;
+  };
+  await writeFile(resolve(directory, 'spec.md'), spec(11));
+  assert.deepEqual(run(project, 'status', ['--run', name]).specSize, { criteria: 11, limit: 10, over: true });
+  assert.equal(record(spec(11)).error.code, 'SPEC_SIZE');
+  await writeFile(resolve(directory, 'spec.md'), spec(10));
+  assert.equal(record(spec(10)).verdict, 'PASS');
+});
