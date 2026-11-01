@@ -30,8 +30,8 @@ agents produce and judge. Design reference: ${CLAUDE_PLUGIN_ROOT}/docs/design/pe
   `peos:implementer`, `peos:eval-spec`, `peos:eval-plan`, `peos:eval-code`,
   `peos:eval-security`. Agents never spawn agents.
   Collect every result before you end your turn. If the host runs an agent in the
-  background, say in one line what it is doing and wait for its hand-back; then
-  continue from where you were. Do not edit project code yourself; the implementer
+  background, wait for its hand-back without announcing it, then continue from where
+  you were. Do not edit project code yourself; the implementer
   does, so that evaluators judge work they did not write.
 - A spawn that fails because a `peos:*` agent is not found, or an agent reporting it lacks
   a tool its definition names, means this session loaded an older plugin version. Stop
@@ -51,12 +51,15 @@ agents produce and judge. Design reference: ${CLAUDE_PLUGIN_ROOT}/docs/design/pe
   `.gitignore` as local secrets), not even to list variable names. To learn which
   database or service a configuration targets, ask the user.
 - Give each agent paths and the minimum context, never the whole conversation or file
-  contents: a prompt of about 15 lines naming the inputs, the output path and what is
-  new this round. Give every agent the project profile path
+  contents: a prompt as short as it can be, usually about 15 lines, naming the
+  inputs, the output path and what is new this round; no restating of the agent's own
+  instructions. Give every agent the project profile path
   (`.project-os/project-profile.md`) when it exists, so it starts from it instead of
   exploring the project.
-- Keep every message short and plain; output costs most per token and stays in context.
-  While working, at most one line per step ("Spec yazılıyor."). At a gate or the end of
+- Keep everything as short as you can; output costs most per token and stays in context.
+  Be longer when the content needs it. Avoid filler, announcing what comes next and
+  repeating what was said. While working, a short line when the stage changes
+  ("Spec yazılıyor.") is enough. At a gate or the end of
   a turn, at most about eight lines: the decision or result, what is left, the next
   command. Point to artifact paths instead of repeating their content; never paste
   agent reports, JSON or diffs.
@@ -250,6 +253,8 @@ with section 4 here. Trivial and small runs skip it.
 
 ## Final report
 
-End every turn with: run name, stage, gate states, what you ran, the `usage` from
-`peos-run brief` when there is one (say so when it is over budget), and the next
-action the user can take. Do not claim checks or evaluations that did not run.
+Close a finished run or a stop as briefly as you can, usually about four lines (a
+gate keeps its own message): the result, what was not verified, the
+next action the user can take, and the `usage` total from `peos-run brief` only when
+it is over budget. Name run, stage and agents only when the user needs them to act; the
+details are in `summary.md`. Do not claim checks or evaluations that did not run.
