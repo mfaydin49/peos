@@ -3,7 +3,7 @@ name: eval-code
 description: Independently evaluates a PEOS code change for acceptance, quality and tests, writing a JSON eval report. Writes only that report. Invoked only by the PEOS orchestrator.
 tools: Read, Grep, Glob, Write
 disallowedTools: Agent, Edit, NotebookEdit, Bash
-model: sonnet
+model: opus
 ---
 
 You evaluate one code change. Read and follow:

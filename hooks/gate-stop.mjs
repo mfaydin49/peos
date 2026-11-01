@@ -6,17 +6,19 @@ import { readInput, projectRoot, profile, activeRuns, emit, transcriptEntries, s
 import { artifactHash, gateArtifacts, gateEvalKeys } from '../scripts/lib/run-state.mjs';
 
 const recentMs = 60 * 60 * 1000;
-// Hosts may run agents in the background: the turn ends while the evaluator works and
-// its result arrives later as a hand-back. An evaluator launched in the background after
-// the artifact was written and not yet handed back is still pending, so stopping is not
-// a skipped step. A foreground result means the evaluator has finished.
-function evaluatorPending(entries, agent, sinceMs) {
+const producers = { spec: 'peos:spec-writer', plan: 'peos:planner' };
+// Hosts may run agents in the background: the turn ends while the agent works and its
+// result arrives later as a hand-back. An evaluator launched after the artifact was
+// written, or a producer still rewriting it, is pending until handed back, so stopping
+// is not a skipped step. A foreground result means the agent has finished.
+function agentPending(entries, agent, sinceMs) {
   const launched = new Map();
   const handedBack = new Set();
   for (const entry of entries) {
     const content = entry?.message?.content;
-    if (entry?.type === 'user' && typeof content === 'string') {
-      for (const match of content.matchAll(/<agent-message from="([\w-]+)"/g)) handedBack.add(match[1]);
+    if (entry?.type === 'user') {
+      const text = typeof content === 'string' ? content : Array.isArray(content) ? content.map(block => block?.text ?? '').join('\n') : '';
+      for (const match of text.matchAll(/<agent-message from="([\w-]+)"/g)) handedBack.add(match[1]);
     }
     if (!Array.isArray(content)) continue;
     for (const block of content) {
@@ -51,7 +53,7 @@ try {
       // Block at most once per artifact version, even if the host omits stop_hook_active.
       const marker = resolve(active.directory, '.stop-block');
       const already = await readFile(marker, 'utf8').catch(() => '') === hash;
-      if (recent && !evaluated && !already && !evaluatorPending(entries, `peos:eval-${gate}`, written - 2000)) {
+      if (recent && !evaluated && !already && !agentPending(entries, `peos:eval-${gate}`, written - 2000) && !agentPending(entries, producers[gate], 0)) {
         await writeFile(marker, hash);
         emit({ decision: 'block', reason: `PEOS run ${active.state.run}: ${gateArtifacts[gate]} was written but has no evaluation for its current content. Run the ${gateEvalKeys[gate]} evaluator and record it with peos-run record-eval, or tell the user why it cannot be evaluated.` });
       }

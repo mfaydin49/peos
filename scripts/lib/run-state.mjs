@@ -13,6 +13,11 @@ export const tierGates = { trivial: [], small: [], standard: ['spec', 'plan'], l
 export const gateArtifacts = { spec: 'spec.md', architecture: 'architecture.md', plan: 'plan.md' };
 // The evaluation that must PASS on the current artifact before its human gate opens.
 export const gateEvalKeys = { spec: 'spec', architecture: 'plan-architecture', plan: 'plan' };
+// The gate the user decides next. A standard run decides once: its plan approval covers the spec.
+export function decisionGate(state) {
+  const open = Object.keys(state.gates).filter(gate => state.gates[gate].status !== 'approved');
+  return state.tier === 'standard' ? open.at(-1) : open[0];
+}
 export const runPattern = /^\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
 

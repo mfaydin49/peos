@@ -1,9 +1,9 @@
-import { lstat, mkdir, readFile } from 'node:fs/promises';
+import { lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
 import { fail, ToolkitError } from './cli.mjs';
 import { git, headCommit } from './git.mjs';
 import { loadConfig, validateConfig } from './config.mjs';
-import { writeJsonAtomic } from './run-state.mjs';
+import { readState, runDirectory, runsPath, writeJsonAtomic } from './run-state.mjs';
 
 // Project setup: the configuration is derived from the project's own manifests, never
 // invented by a model, so the commands peos-run executes are the project's declared ones.
@@ -90,6 +90,29 @@ async function profileStatus(project) {
   return { status: 'fresh', changedFiles: changed.length };
 }
 
+// Static task checks the manifests declare but an existing configuration lacks. Test
+// commands are left out: a configuration may already run its tests under another name.
+function missingChecks(config, detected) {
+  const script = entry => entry.args.at(-1);
+  return detected.filter(entry => entry.phases.includes('task') && entry.kind !== 'test'
+    && !config.checks.some(existing => existing.id === entry.id || existing.kind === entry.kind || (existing.executable === entry.executable && script(existing) === script(entry))));
+}
+// A run past implementation start is bound to the configuration, so checks are added
+// only while no run is before its release stage.
+async function runInProgress(project) {
+  const names = await readdir(resolve(project, runsPath)).catch(() => []);
+  for (const name of names.filter(entry => !entry.startsWith('.'))) {
+    const state = await runDirectory(project, name).then(readState).catch(() => null);
+    if (state && !['release', 'done', 'stopped'].includes(state.stage)) return true;
+  }
+  return false;
+}
+// Claude Code loads CLAUDE.md, not AGENTS.md; the import makes the project's rules load.
+async function linkInstructions(project) {
+  try { await writeFile(resolve(project, 'CLAUDE.md'), '@AGENTS.md\n', { flag: 'wx' }); return 'created'; }
+  catch (error) { if (error.code === 'EEXIST') return 'present'; throw error; }
+}
+
 export async function setupProject(project) {
   const head = headCommit(project);
   let config = 'existing';
@@ -108,8 +131,17 @@ export async function setupProject(project) {
     await mkdir(resolve(project, '.project-os'), { recursive: true });
     await writeJsonAtomic(resolve(project, configPath), created);
     config = 'created';
-  } else await loadConfig(project);
+  }
+  const current = await loadConfig(project);
+  const missing = config === 'created' ? [] : missingChecks(current, await detectChecks(project));
+  const label = entry => `${entry.id}: ${[entry.executable, ...entry.args].join(' ')}`;
+  const add = missing.length > 0 && !await runInProgress(project);
+  if (add) {
+    await writeJsonAtomic(resolve(project, configPath), validateConfig({ ...JSON.parse(await text(project, configPath)), checks: [...current.checks, ...missing] }));
+    config = 'updated';
+  }
   const instructions = Object.fromEntries(await Promise.all(instructionFiles.map(async path => [path, await exists(project, path) ? 'present' : 'missing'])));
-  return { config, configPath: resolve(project, configPath), checks: (await loadConfig(project)).checks.map(entry => `${entry.id}: ${[entry.executable, ...entry.args].join(' ')}`),
+  if (instructions['AGENTS.md'] === 'present' && instructions['CLAUDE.md'] === 'missing') instructions['CLAUDE.md'] = await linkInstructions(project);
+  return { config, configPath: resolve(project, configPath), addedChecks: add ? missing.map(label) : [], suggestedChecks: add ? [] : missing.map(label), checks: (await loadConfig(project)).checks.map(entry => `${entry.id}: ${[entry.executable, ...entry.args].join(' ')}`),
     instructions, profile: { path: resolve(project, profilePath), head, ...await profileStatus(project) } };
 }

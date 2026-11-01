@@ -25,8 +25,35 @@ test('setup writes the configuration from the manifests and never overwrites it'
   assert.equal(written.projectName, 'shop');
   assert.deepEqual(written.checks.find(entry => entry.id === 'build').phases, ['release']);
   await saveConfig(project, config());
-  assert.equal(run(project, 'setup').config, 'existing');
-  assert.equal(JSON.parse(await readFile(resolve(project, '.project-os/engineering.config.json'), 'utf8')).projectName, 'fixture');
+  const existing = run(project, 'setup');
+  assert.deepEqual([existing.config, existing.addedChecks], ['updated', ['typecheck: pnpm run typecheck', 'lint: pnpm run lint']]);
+  const kept = JSON.parse(await readFile(resolve(project, '.project-os/engineering.config.json'), 'utf8'));
+  assert.equal(kept.projectName, 'fixture', 'the rest of the configuration stays');
+  assert.deepEqual(kept.checks.map(entry => entry.id).slice(-2), ['typecheck', 'lint']);
+  assert.deepEqual([run(project, 'setup').config, run(project, 'setup').addedChecks], ['existing', []]);
+});
+
+test('setup leaves the configuration alone while a run is in progress', async t => {
+  const project = await repository(t);
+  await saveConfig(project, config());
+  await writeFile(resolve(project, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run', lint: 'eslint .' } }));
+  commit(project);
+  const { run: name } = run(project, 'init', ['--name', 'avatar', '--type', 'feature', '--tier', 'small']);
+  const during = run(project, 'setup');
+  assert.deepEqual([during.config, during.addedChecks, during.suggestedChecks], ['existing', [], ['lint: npm run lint']]);
+  run(project, 'advance', ['--run', name, '--to', 'stopped']);
+  assert.deepEqual(run(project, 'setup').addedChecks, ['lint: npm run lint']);
+});
+
+test('setup links CLAUDE.md to an existing AGENTS.md and never overwrites it', async t => {
+  const project = await repository(t);
+  await saveConfig(project, config());
+  await writeFile(resolve(project, 'AGENTS.md'), '# Rules\n');
+  assert.deepEqual(run(project, 'setup').instructions, { 'AGENTS.md': 'present', 'CLAUDE.md': 'created' });
+  assert.equal(await readFile(resolve(project, 'CLAUDE.md'), 'utf8'), '@AGENTS.md\n');
+  await writeFile(resolve(project, 'CLAUDE.md'), 'own rules\n');
+  assert.deepEqual(run(project, 'setup').instructions, { 'AGENTS.md': 'present', 'CLAUDE.md': 'present' });
+  assert.equal(await readFile(resolve(project, 'CLAUDE.md'), 'utf8'), 'own rules\n');
 });
 
 test('check detection covers package managers, placeholders and other ecosystems', async t => {

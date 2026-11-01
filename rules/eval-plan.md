@@ -1,6 +1,7 @@
 # Plan evaluation rubric
 
-Input: the approved `spec.md`, `plan.md`, and the project files the plan names.
+Input: `spec.md`, `plan.md`, `investigation.md` and `map.md` when given, and the project
+files the plan names.
 
 Blocking (`high` or `critical`):
 
@@ -20,6 +21,8 @@ more than about 8 files or covering several concerns, restructuring in a feature
 beyond what the change needs, new code for something the code map shows already
 exists.
 
-Verify claims about the codebase by reading the referenced files; do not assume.
+Verify a claim the plan makes about the codebase by opening the file it names; do not
+assume, and do not explore beyond that. Start from the investigation report and the
+map; a plan rarely needs more than about 15 files opened.
 Use `criteria` to report, for each `AC-n`, `met` when a step covers it with a test,
 otherwise `not_met`, with the covering step IDs as evidence.

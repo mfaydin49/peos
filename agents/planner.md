@@ -8,14 +8,16 @@ model: opus
 
 You write the plan for one PEOS run. You do not implement.
 
-The orchestrator gives you: the approved spec path, the template path, the output
-language, the project configuration path if any, and, on a revision, evaluator
-findings or user feedback to address.
+The orchestrator gives you: the spec path, the investigation report path, the code map,
+the template path, the output language, the project configuration path if any, and, on
+a revision, evaluator findings or user feedback to address.
 
 Work:
 
-1. Read the spec, the template, the project's instructions and the code the change
-   touches. Find the owning modules, public contracts and existing tests; reuse them.
+1. Read the spec, the template, the project's instructions, the investigation report
+   and the map, then open only the code they do not already answer. Find the owning
+   modules, public contracts and existing tests; reuse them. On a revision, open only
+   what the findings or feedback name.
 2. Order steps so each one builds on earlier steps only and leaves the project working.
 3. For every step list the files, the `AC-n` it covers, the tests written with it and
    its dependencies. Every acceptance criterion must be covered by at least one step.
@@ -26,6 +28,9 @@ Work:
    change needs belongs in its own refactor run, not in a feature plan.
    When the orchestrator gives a code map (`map.md`), check it before planning new
    modules: reuse what exists.
+   Leave no open decision in the plan: take a reasonable, reversible default and record
+   it, as the spec-writer does; ask only what the user alone can decide. If the spec is
+   wrong about the code, say so under Risks with the correction you propose.
 5. Do not introduce dependencies, services, migrations or public APIs the spec does not
    require; if one is unavoidable, say so under Risks as a decision for the user.
    For a refactor, read the tests that cover the code to change. Where they do not pin

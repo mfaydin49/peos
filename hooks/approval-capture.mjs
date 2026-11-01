@@ -3,11 +3,11 @@
 import { readInput, projectRoot, activeRuns } from './common.mjs';
 import { writeGrant } from '../scripts/lib/grants.mjs';
 import { basename } from 'node:path';
-import { runDirectory } from '../scripts/lib/run-state.mjs';
+import { decisionGate, runDirectory } from '../scripts/lib/run-state.mjs';
 
 const name = '[a-z0-9]+(?:-[a-z0-9]+)*';
 const patterns = [
-  [new RegExp(`^/peos:approve\\s+(spec|architecture|plan)(?:\\s+(${name}))?\\s*$`), 'approve'],
+  [new RegExp(`^/peos:approve(?:\\s+(spec|architecture|plan)(?:\\s+(${name}))?)?\\s*$`), 'approve'],
   [new RegExp(`^/peos:revise\\s+(spec|architecture|plan)(?:\\s+--run\\s+(${name}))?(?:\\s[\\s\\S]*)?$`), 'revise'],
   [new RegExp(`^/peos:retry\\s+(${name})(?:\\s+(${name}))?\\s*$`), 'reset-eval']
 ];
@@ -21,8 +21,11 @@ try {
     if (match && project) {
       // Bind the decision to one run: the named one (it must resolve) or the most
       // recently updated unfinished run, which is what the entry skills default to.
-      const run = match[2] ? basename(await runDirectory(project, match[2])) : (await activeRuns(project))[0]?.state.run;
-      if (run) await writeGrant(project, { action, target: match[1], run, source: 'user-prompt' });
+      const latest = match[2] ? null : (await activeRuns(project))[0]?.state;
+      const run = match[2] ? basename(await runDirectory(project, match[2])) : latest?.run;
+      // A bare /peos:approve decides the run's pending gate.
+      const target = match[1] ?? (latest && decisionGate(latest));
+      if (run && target) await writeGrant(project, { action, target, run, source: 'user-prompt' });
       break;
     }
   }

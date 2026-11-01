@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { readInput, projectRoot, emit } from './common.mjs';
 
 const peosRun = fileURLToPath(new URL('../scripts/peos-run.mjs', import.meta.url));
-const writableArtifacts = ['task.md', 'idea.md', 'spec.md', 'architecture.md', 'plan.md', 'summary.md', 'pending-eval.json'];
+const writableArtifacts = ['task.md', 'idea.md', 'investigation.md', 'spec.md', 'architecture.md', 'plan.md', 'summary.md', 'pending-eval.json'];
 const pendingReport = /^pending-eval-[a-z0-9-]+\.json$/;
 // The one run file each producer or evaluator may write.
 const agentRunFile = { 'peos:spec-writer': name => name === 'spec.md', 'peos:planner': name => name === 'plan.md' };

@@ -2,6 +2,7 @@
 import { lstat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { readInput, projectRoot, profile, activeRuns, emit } from './common.mjs';
+import { decisionGate } from '../scripts/lib/run-state.mjs';
 
 try {
   const { input } = await readInput();
@@ -9,7 +10,7 @@ try {
   const runs = profile() === 'minimal' || !project ? [] : (await activeRuns(project)).slice(0, 3);
   if (runs.length) {
     const lines = await Promise.all(runs.map(async ({ state, directory }) => {
-      const pending = Object.entries(state.gates).find(([, gate]) => gate.status !== 'approved')?.[0];
+      const pending = decisionGate(state);
       const noBaseline = state.type === 'refactor' && state.baseHead && !(await lstat(resolve(directory, 'baseline-checks.json')).catch(() => null));
       return `- ${state.run} (${state.type}/${state.tier}) at ${state.stage}${pending ? `; next gate: ${pending}` : ''}${noBaseline ? '; refactor baseline missing' : ''}`;
     }));

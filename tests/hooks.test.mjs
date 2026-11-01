@@ -64,6 +64,8 @@ test('approval-capture turns only a whole decision command into a grant', async 
   assert.deepEqual([(await grant()).action, (await grant()).target, (await grant()).run], ['revise', 'plan', name]);
   hook('approval-capture', project, { prompt: '/peos:retry code-all' });
   assert.deepEqual([(await grant()).action, (await grant()).target, (await grant()).run], ['reset-eval', 'code-all', name], 'bound to the active run');
+  hook('approval-capture', project, { prompt: '/peos:approve' });
+  assert.deepEqual([(await grant()).action, (await grant()).target, (await grant()).run], ['approve', 'plan', name], 'a standard run decides at the plan gate');
   hook('approval-capture', project, { prompt: '  /peos:approve spec  ' });
   assert.equal((await grant()).source, 'user-prompt');
   await evaluatedSpec(project, name, directory);
@@ -78,7 +80,7 @@ test('state-guard denies writes to run state, evidence and decisions, and allows
   for (const path of ['state.json', 'checks.json', 'evals/spec.json', 'state.lock', 'state.json.tmp-1-ab']) assert.ok(denied(write(resolve(directory, path))), path);
   assert.ok(denied(write(resolve(project, '.project-os/runs/.grant.json'))));
   assert.ok(denied(hook('state-guard', project, { tool_name: 'Edit', cwd: directory, tool_input: { file_path: 'state.json' } })), 'relative path');
-  for (const path of ['spec.md', 'plan.md', 'pending-eval.json']) assert.equal(write(resolve(directory, path)), null, path);
+  for (const path of ['investigation.md', 'spec.md', 'plan.md', 'pending-eval.json']) assert.equal(write(resolve(directory, path)), null, path);
   assert.equal(write(resolve(project, 'src/state.json')), null, 'outside runs');
   const bash = command => hook('state-guard', project, { tool_name: 'Bash', tool_input: { command } });
   const script = resolve(toolkit, 'scripts/peos-run.mjs');
@@ -144,6 +146,12 @@ test('gate-stop waits for an evaluator running in the background', async t => {
   const own = ranPeos(`status --run ${name}`);
   await writeFile(transcript_path, [own, launch('peos:planner'), result('peos:planner')].join('\n'));
   assert.equal(hook('gate-stop', project, { transcript_path }).decision, 'block', 'another agent does not count');
+  await writeFile(resolve(directory, 'spec.md'), 'draft v1');
+  await writeFile(transcript_path, [own, launch('peos:spec-writer'), result('peos:spec-writer')].join('\n'));
+  assert.equal(hook('gate-stop', project, { transcript_path }), null, 'the producer is still rewriting it');
+  const handBackBlocks = JSON.stringify({ type: 'user', timestamp: at, message: { content: [{ type: 'text', text: '<agent-message from="id-peos-spec-writer">' }] } });
+  await writeFile(transcript_path, [own, launch('peos:spec-writer'), result('peos:spec-writer'), handBackBlocks].join('\n'));
+  assert.equal(hook('gate-stop', project, { transcript_path }).decision, 'block', 'the producer handed back');
   await writeFile(resolve(directory, 'spec.md'), 'draft v2');
   await writeFile(transcript_path, [own, launch('peos:eval-spec'), result('peos:eval-spec')].join('\n'));
   assert.equal(hook('gate-stop', project, { transcript_path }), null, 'evaluator still running');
@@ -170,7 +178,7 @@ test('gate-stop picks the run the session works on, not a run whose name contain
 test('session-resume summarizes unfinished runs unless minimal', async t => {
   const { project, name } = await standardRun(t);
   const output = hook('session-resume', project, { source: 'startup' });
-  assert.match(output.hookSpecificOutput.additionalContext, new RegExp(`${name} \\(feature/standard\\) at intake; next gate: spec`));
+  assert.match(output.hookSpecificOutput.additionalContext, new RegExp(`${name} \\(feature/standard\\) at intake; next gate: plan`));
   assert.equal(hook('session-resume', project, {}, 'minimal'), null);
   const empty = await repository(t);
   assert.equal(hook('session-resume', empty, {}), null);

@@ -314,12 +314,14 @@ node /path/to/personal-engineering-os/scripts/peos-run.mjs setup --project /path
   is not the current artifact hash (spec/plan) or fingerprint (code), and caps
   consecutive non-PASS rounds at three; the third failed round returns
   `limitReached: true`. `reset-eval` clears one key after the human decides to continue.
+  Recording a spec evaluation for changed content discards the plan evaluation.
 - `approve` requires earlier gates to be fresh and a fresh PASS evaluation of the
-  gate's artifact. An approval goes stale when its artifact or an earlier approved
+  gate's artifact. On a `standard` run, approving `plan` also approves an unapproved
+  spec whose evaluation PASSed on the current `spec.md`. An approval goes stale when its artifact or an earlier approved
   artifact changes; a new approval reopens every later gate. `revise` reopens the gate
   and every later gate, and is refused on a finished run.
 - `advance` to a gated stage (`architecture`, `plan`) requires every earlier tier gate
-  fresh; to `implement`/`verify`/`evaluate` all tier gates fresh; to
+  fresh (a `standard` run may plan on a spec with a fresh PASS evaluation); to `implement`/`verify`/`evaluate` all tier gates fresh; to
   `release` additionally a full PASS `checks.json` (either phase) and PASS code
   evaluations (at least one `code-*`; `large` needs the acceptance, quality and tests
   foci), all for the current fingerprint; to `done` the same with release-phase checks.

@@ -24,6 +24,10 @@ The report:
 - Text limits: each `evidence`, `problem`, `impact`, `fix` and `notAssessed` entry is
   non-blank and at most 500 characters; IDs are `AC-<n>` and `F<n>`. Aim for one
   sentence each: every word is read again by the orchestrator and the next round.
+- The first round is the full pass: report every blocking problem you can find at once,
+  so one revision can fix them all. On a later round the orchestrator gives the previous
+  findings: check that they are fixed and that the revision broke nothing; do not repeat
+  the full audit. A new blocking finding there must be a real miss, not a stricter reading.
 - Do not withhold PASS to appear rigorous. A clean input gets PASS with no findings.
 - No concrete case, no finding: `problem` names the input, state or sequence that goes
   wrong; `impact` says what happens if it is not fixed. "Could be cleaner" is not a case.

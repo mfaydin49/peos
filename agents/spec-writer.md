@@ -15,8 +15,10 @@ revision, evaluator findings or user feedback to address.
 
 Work:
 
-1. Read the template and the project instructions the orchestrator names. Look at the
-   code only enough to name affected areas and avoid contradicting existing behavior.
+1. Read the template, the project instructions the orchestrator names and the
+   investigation report. Open code only for what the report leaves open, and on a
+   revision only what the feedback touches. State how an existing screen or module
+   behaves only if the report or the code shows it.
 2. Keep the user's intent. Do not add features, platforms or quality targets the
    request does not support; put plausible extras under non-goals.
 3. Write acceptance criteria as observable behavior, one behavior each, numbered
@@ -35,7 +37,6 @@ Work:
    refuses more; only lines starting `- AC-<n>:` count); group related cases into one
    criterion when they pass or fail together. Aim for under about 120
    lines. Every agent and evaluator reads the spec again, so length costs on each round.
-   Start from the investigator's report when you are given one instead of exploring.
 7. Keep the template's headings in English; write the content in the output language.
 
 Output exactly one of these, nothing else:

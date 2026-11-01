@@ -246,6 +246,8 @@ async function recordEval(project, options) {
     try { earlier = round > 1 ? JSON.parse(await readRunFile(evals, `${key}.json`) ?? 'null') : null; } catch { earlier = null; }
     await writeJsonAtomic(resolve(evals, `${key}.json`), report);
     state.evals[key] = { verdict: report.verdict, round, subject: report.subject };
+    // A plan evaluated against an older spec no longer counts.
+    if (key === 'spec' && previous?.subject !== report.subject) delete state.evals.plan;
     await writeState(directory, state);
     // The report is recorded: its pending file has served its purpose.
     if (consumed) await rm(consumed, { force: true });
@@ -253,6 +255,11 @@ async function recordEval(project, options) {
     return { run: state.run, key, verdict: report.verdict, round, limitReached: report.verdict !== 'PASS' && round === 3,
       plateau: report.verdict === 'FAIL' && earlier?.verdict === 'FAIL' && signature(earlier) === signature(report), ...digest(report) };
   });
+}
+const coversSpec = (state, gate) => state.tier === 'standard' && gate === 'plan' && Object.hasOwn(state.gates, 'spec');
+function requireFreshPass(assessment, gate) {
+  const evaluation = assessment.evals[gateEvalKeys[gate]];
+  if (!evaluation || !evaluation.fresh || evaluation.verdict !== 'PASS') fail('GATE', `The ${gateEvalKeys[gate]} evaluation must PASS on the current ${gateArtifacts[gate]} before approval.`);
 }
 // Gate decisions consume a grant left by the user's own command (design §12).
 async function approve(project, options) {
@@ -262,17 +269,21 @@ async function approve(project, options) {
     const gate = choice(options.gate, Object.keys(state.gates), 'gate');
     await consumeGrant(project, 'approve', gate, state.run);
     const assessment = await assess(directory, state, null);
+    // A standard run decides once: the plan approval also covers an unapproved spec.
+    const covered = coversSpec(state, gate) && !assessment.gates.spec.fresh ? ['spec'] : [];
     const earlier = gateOrder.slice(0, gateOrder.indexOf(gate)).filter(name => Object.hasOwn(state.gates, name));
-    const open = earlier.filter(name => !assessment.gates[name].fresh);
+    const open = earlier.filter(name => !assessment.gates[name].fresh && !covered.includes(name));
     if (open.length) fail('GATE', `Approve earlier gates first: ${open.join(', ')}.`);
-    const hash = assessment.artifacts[gate];
-    if (hash === null) fail('GATE', `${gateArtifacts[gate]} is missing.`);
-    const evaluation = assessment.evals[gateEvalKeys[gate]];
-    if (!evaluation || !evaluation.fresh || evaluation.verdict !== 'PASS') fail('GATE', `The ${gateEvalKeys[gate]} evaluation must PASS on the current ${gateArtifacts[gate]} before approval.`);
+    const decided = [...covered, gate];
+    for (const name of decided) {
+      if (assessment.artifacts[name] === null) fail('GATE', `${gateArtifacts[name]} is missing.`);
+      requireFreshPass(assessment, name);
+    }
     if (assessment.gates[gate].fresh) return { run: state.run, gate, gates: state.gates };
     // A new approval changes what later artifacts were built on, so later gates must be re-evaluated and re-approved.
     reopenLater(state, gate);
-    state.gates[gate] = { status: 'approved', by: 'human', artifactHash: hash, at: new Date().toISOString() };
+    const at = new Date().toISOString();
+    for (const name of decided) state.gates[name] = { status: 'approved', by: 'human', artifactHash: assessment.artifacts[name], at };
     await writeState(directory, state);
     return { run: state.run, gate, gates: state.gates };
   });
@@ -362,10 +373,13 @@ async function advance(project, options) {
     const to = choice(options.to, stages, 'to');
     if (state.stage === 'done') fail('TRANSITION', 'The run is finished.');
     if (to === 'done' && state.stage !== 'release') fail('TRANSITION', 'Only a run at the release stage can finish.');
-    // A gated stage starts only on approved earlier artifacts, e.g. planning needs a fresh spec approval.
+    // A gated stage starts only on approved earlier artifacts; a standard run plans on an
+    // evaluated spec, which the user approves together with the plan.
     if (gateOrder.includes(to)) {
       const assessment = await assess(directory, state, null);
-      const open = gateOrder.slice(0, gateOrder.indexOf(to)).filter(name => Object.hasOwn(assessment.gates, name) && !assessment.gates[name].fresh);
+      const covered = coversSpec(state, to) && !assessment.gates.spec.fresh;
+      if (covered) requireFreshPass(assessment, 'spec');
+      const open = gateOrder.slice(0, gateOrder.indexOf(to)).filter(name => Object.hasOwn(assessment.gates, name) && !assessment.gates[name].fresh && !(covered && name === 'spec'));
       if (open.length) fail('GATE', `Approve earlier gates first: ${open.join(', ')}.`);
     }
     if (gatedStages.includes(to)) {
@@ -393,11 +407,11 @@ async function advance(project, options) {
 }
 async function step(project, options) {
   const directory = await runDirectory(project, options.run);
-  if (typeof options.step !== 'string' || !/^S[1-9][0-9]*$/.test(options.step)) fail('INVOCATION', '--step must look like S1.');
+  if (typeof options.step !== 'string' || !/^S[1-9][0-9]*(?:,S[1-9][0-9]*)*$/.test(options.step)) fail('INVOCATION', '--step must look like S1 or S1,S2.');
   const value = choice(options.status, ['pending', 'in_progress', 'done', 'reverted'], 'status');
   return withLock(directory, async () => {
     const state = await readState(directory);
-    state.steps[options.step] = value;
+    for (const id of options.step.split(',')) state.steps[id] = value;
     await writeState(directory, state);
     return { run: state.run, steps: state.steps };
   });
@@ -434,6 +448,8 @@ await main(async () => {
   if (report.action === 'record-eval') return `${report.verdict}: ${report.key} round ${report.round} recorded for ${report.run}`;
   if (report.action === 'setup') return [
     `config: ${report.config} (${report.checks.join('; ')})`,
+    ...(report.addedChecks.length ? [`checks added: ${report.addedChecks.join('; ')}`] : []),
+    ...(report.suggestedChecks.length ? [`checks to add after the active run: ${report.suggestedChecks.join('; ')}`] : []),
     ...Object.entries(report.instructions).map(([file, state]) => `${file}: ${state}`),
     `profile: ${report.profile.status}${report.profile.reason ? ` (${report.profile.reason})` : ''}`
   ].join('\n');

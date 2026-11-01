@@ -40,7 +40,8 @@ report and PR flow arrive in increment 6; see the [v2 design](docs/design/peos-v
 claude --plugin-dir /path/to/personal-engineering-os
 ```
 
-Gate decisions take effect only right after you type the command yourself; see design §12
+A `standard` run asks for one decision: `/peos:approve` after the spec and plan both
+pass evaluation. Gate decisions take effect only right after you type the command yourself; see design §12
 for what the hooks do and do not guarantee.
 
 ## Requirements

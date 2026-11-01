@@ -19,8 +19,8 @@ agents produce and judge. Design reference: ${CLAUDE_PLUGIN_ROOT}/docs/design/pe
   for that gate or key; the plugin records that command and each decision uses it
   once. Run them only from those entry points, and never try `peos-run grant` or to
   write decision files: the plugin blocks it. On a `GRANT` refusal, tell the user
-  which command to type. A later gate reached in the same turn needs its own
-  `/peos:approve`.
+  which command to type. A `standard` run has one decision: `/peos:approve` at the plan
+  gate also approves the spec. A `large` run decides each gate with its own command.
 - The run directory is `${CLAUDE_PROJECT_DIR}/.project-os/runs/<run>/`; `status --run`
   returns it as `directory`. Write run artifacts only there; the only other files you
   write are those of section 0. `--run` accepts the dated run name or the name alone.
@@ -63,7 +63,8 @@ agents produce and judge. Design reference: ${CLAUDE_PLUGIN_ROOT}/docs/design/pe
   Give evaluators the inputs their rubric names and the `subject` (`artifacts.<gate>`
   from `status` for spec and plan, `codeState` from `changes` for code); never pass
   your own opinion of the work.
-- Producers and evaluators write their own output, so you never copy it: give the
+- Producers and evaluators write their own output, so you never copy it (the one
+  exception is `investigation.md`, section 1): give the
   producer its artifact path (`<directory>/spec.md`, `<directory>/plan.md`) and each
   evaluator its report path `<directory>/pending-eval-<name>.json`, where `<name>` is
   the evaluator's own (`spec`, `plan`, `code`, `security`; `code-<focus>` for a focused
@@ -92,23 +93,27 @@ Run before every new run (it is fast when nothing is missing) and for `/peos:ini
    manifests when it is missing (no approval needed; tell the user in one line which
    checks it configured) and reports the instruction files and the profile. If it
    fails with `SETUP` (no test command detected), tell the user the reason and stop.
-2. If the profile is `missing` or `stale`, or this is `/peos:init`: spawn
+   It also adds typecheck and lint checks the manifests declare but the configuration lacks (none
+   while a run is before its release stage; then it lists them as `suggestedChecks`) and
+   creates `CLAUDE.md` importing an existing `AGENTS.md`.
+2. If the profile is `missing` or `stale`, `AGENTS.md` is `missing`, or this is `/peos:init`: spawn
    `peos:profiler` with the project root, `${CLAUDE_PLUGIN_ROOT}/templates/project-profile.md`,
    the configured checks, the commit `profile.head`, whether a profile exists, and,
    when `AGENTS.md` is `missing`, a request to write it from
    `${CLAUDE_PLUGIN_ROOT}/templates/project-agents.md`, plus `CLAUDE.md` when that is
    also `missing`. The plugin lets it create those two only when they do not exist.
-3. Tell the user in one line which files were created; they stay uncommitted for the
-   user to review.
+3. Tell the user in one line which files were created and which checks were added;
+   they stay uncommitted for the user to review.
 
 ## 1. Intake (new run)
 
 Spawn `peos:investigator` with the request, any evidence the user gave, the profile
 path and the names of the project's instruction files. Classify from its report, not
 from your own reading, and state the result in one line the user can override
-(`--tier`/`--type` in the request override your choice). Give the report to the
-spec-writer (standard) or use it for `task.md` (trivial, small), so nobody explores the
-same code twice.
+(`--tier`/`--type` in the request override your choice). On a standard run, write the
+report word for word to `<directory>/investigation.md` after `init` (the investigator
+runs before the run exists) and give that path to every producer and plan or spec
+evaluator; on trivial and small, use it for `task.md`. Nobody explores the same code twice.
 
 | Tier | Files touched | New dependency / contract | Design ambiguity |
 | --- | --- | --- | --- |
@@ -156,9 +161,9 @@ output language) with its inline plan step `S1`. There is no human gate: continu
 with section 4. If the work turns out larger than classified, stop and tell the user
 it needs a `standard` run.
 
-## 3. Standard: produce → evaluate → gate
+## 3. Standard: produce → evaluate → one decision
 
-For each gated stage, in order `spec`, then `plan`:
+For each stage, in order `spec`, then `plan`:
 
 | Stage | Producer | Template | Artifact | Evaluator |
 | --- | --- | --- | --- | --- |
@@ -166,8 +171,8 @@ For each gated stage, in order `spec`, then `plan`:
 | plan | `peos:planner` | `templates/run/plan.md` | `plan.md` | `peos:eval-plan` |
 
 1. `peos-run advance --to <stage>`.
-2. Spawn the producer. Before the planner, run `peos-run map --run <run>` and give it
-   `<directory>/map.md`. Give the spec-writer the request, the evidence and every
+2. Spawn the producer. Before the first planner, run `peos-run map --run <run>` and give
+   it `<directory>/map.md`. Give the spec-writer the request, the evidence and every
    answer the user has already given. On `STATUS: QUESTIONS`, drop the questions the
    project or the evidence answers, ask the rest in one round (see Fixed rules), then
    spawn the producer again with all answers.
@@ -177,20 +182,29 @@ For each gated stage, in order `spec`, then `plan`:
    the producer did not write it; spawn it again once). If `specSize.over` is true,
    spawn the spec-writer once more to merge criteria down to `specSize.limit`;
    `record-eval` refuses an oversized spec (`SPEC_SIZE`).
-5. Spawn the evaluator and record its report (see Fixed rules).
-6. `FAIL`: spawn the producer again with the findings; repeat from 3. Stop and ask the
+5. Spawn the evaluator and record its report (see Fixed rules). On a later round also
+   give it the previous `blocking` findings and the producer's summary of what changed.
+6. `FAIL`: spawn the producer again with the findings; repeat from 3. A finding that is
+   a reversible detail gets a default, not a question. Stop and ask the
    user when `record-eval` returns `limitReached: true` (third failed round) or
    `plateau: true` (the same blocking findings two rounds in a row). Show the remaining
    blocking findings and the user's options: `/peos:revise <stage> <feedback>` to
    redirect the work, `/peos:retry <key>` to try again as is, or stop.
    `BLOCKED`: report what the evaluator could not assess and ask the user.
-7. `PASS`: show the user the producer's summary lines, the count of remaining
-   non-blocking findings and the artifact path, then end your turn with:
-   approve with `/peos:approve <stage>`, or request changes with
-   `/peos:revise <stage> <feedback>`.
+7. Spec `PASS`: say so in one line and continue with the plan stage in the same turn.
+   Plan `PASS`: show both producers' summary lines together (at most about eight lines),
+   the count of remaining non-blocking findings and both artifact paths, then end your
+   turn with: approve with `/peos:approve`, or request changes with
+   `/peos:revise <spec|plan> <feedback>`.
 
-After the plan gate is approved, continue with section 4 in the same turn: the
-approved plan is the user's consent to implement it.
+Until that approval the spec is not frozen. When a user's answer or an evaluator finding
+at the plan stage changes the spec, spawn the spec-writer with the change, evaluate the
+new spec, then revise the plan and evaluate it; do not ask for `/peos:revise`. Recording
+the new spec evaluation discards the plan evaluation. Once the gates are approved, a
+change of scope needs the user's `/peos:revise`.
+
+After the approval, continue with section 4 in the same turn: the approved spec and plan
+are the user's consent to implement them.
 
 ## 4. Implement
 
@@ -204,12 +218,12 @@ approved plan is the user's consent to implement it.
    (trivial and small runs: `task.md` is both the spec and the plan, with step `S1`)
    with one implementer per batch, not one per step: a batch is every remaining step
    in order, except that steps marked `Parallel: yes` whose files do not overlap may
-   go to separate implementers spawned together. Mark each step of the batch
-   `peos-run step --run <run> --step <Sn> --status in_progress`, then spawn
+   go to separate implementers spawned together. Mark the whole batch in one call,
+   `peos-run step --run <run> --step S1,S2,S3 --status in_progress`, then spawn
    `peos:implementer` with the spec (or task) path, the plan path, the step IDs in
    order, `<directory>/map.md` and the configured check commands (`executable` and
-   `args` from the project configuration). For each step it reports `DONE`, run
-   `peos-run step --run <run> --step <Sn> --status done`. If it reports a step
+   `args` from the project configuration). Mark the steps it reports `DONE` in one call:
+   `peos-run step --run <run> --step S1,S2,S3 --status done`. If it reports a step
    `BLOCKED`, the steps after it were not started: stop and put the decision to the
    user.
 
@@ -266,7 +280,8 @@ Read `peos-run status --run <run>` and act on the first row that applies:
 | An evaluation is non-PASS at round 3 | Show its blocking findings and the options of section 3 step 6; stop. |
 | A gate's approval is stale (artifact changed after approval) | Say which artifact changed; it needs a new evaluation and approval (section 3). |
 | A gate is pending or revision-requested without a fresh PASS evaluation | Section 3 for that stage, with the user's feedback on a revision. |
-| A gate has a fresh PASS evaluation awaiting approval | Remind the user of `/peos:approve <gate>` and `/peos:revise <gate> …`. |
+| A standard run's spec evaluation PASSed but its plan has none | Section 3, plan stage; the spec is approved together with the plan. |
+| A gate has a fresh PASS evaluation awaiting approval | Remind the user of `/peos:approve` and `/peos:revise <gate> …`. |
 | A refactor has no baseline (`status` says so) | Record it if no step changed code yet; otherwise the `BASELINE` instruction of section 4.1. |
 | Stage `implement` with steps not `done` | Section 4: its step 1 first (safe to repeat; binds older runs), then from the first unfinished step. |
 | Stage `verify` | Section 5. |

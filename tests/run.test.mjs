@@ -76,7 +76,7 @@ test('human gates need a fresh PASS evaluation, follow order, and go stale on ed
   assert.equal(run(project, 'approve', ['--run', name, '--gate', 'spec']).report.error.code, 'GATE');
   await writeFile(resolve(runDir(project, name), 'plan.md'), 'plan v1');
   await submit(t, project, name, { evaluator: 'plan', verdict: 'PASS', subject: `sha256:${sha('plan v1')}` });
-  assert.match(run(project, 'approve', ['--run', name, '--gate', 'plan']).report.error.message, /earlier gates.*spec/);
+  assert.equal(run(project, 'approve', ['--run', name, '--gate', 'plan']).report.error.code, 'GATE', 'the spec is unevaluated');
   assert.equal((await approveArtifact(t, project, name, 'spec', 'spec v1')).report.status, 'PASS');
   assert.equal(run(project, 'advance', ['--run', name, '--to', 'implement']).report.error.code, 'GATE');
   // Approving spec discarded the plan evaluation recorded before it.
@@ -261,20 +261,42 @@ test('the documented standard procedure runs end to end through the plan gate', 
   const { project, name, dir } = await start(t);
   const short = name.slice(11);
   assert.equal(run(project, 'advance', ['--run', short, '--to', 'spec']).report.stage, 'spec');
-  assert.equal(run(project, 'advance', ['--run', short, '--to', 'plan']).report.error.code, 'GATE', 'planning needs an approved spec');
+  assert.equal(run(project, 'advance', ['--run', short, '--to', 'plan']).report.error.code, 'GATE', 'planning needs an evaluated spec');
   const status = run(project, 'status', ['--run', short]).report;
   assert.equal(status.directory, dir);
   await writeFile(resolve(status.directory, 'spec.md'), 'spec');
   const subject = run(project, 'status', ['--run', short]).report.artifacts.spec;
   const report = input => jsonCli('peos-run.mjs', ['record-eval', '--project', project, '--run', short, '--report', '-'], { input: JSON.stringify(input) }).report;
   const base = { schemaVersion: 1, mode: 'full', criteria: [], findings: [], notAssessed: [] };
+  assert.equal(report({ ...base, evaluator: 'spec', verdict: 'FAIL', subject, findings: [{ id: 'F1', severity: 'high', problem: 'p', impact: 'i', fix: 'f' }] }).key, 'spec');
+  assert.equal(run(project, 'advance', ['--run', short, '--to', 'plan']).report.error.code, 'GATE', 'a failed evaluation does not open planning');
   assert.equal(report({ ...base, evaluator: 'spec', verdict: 'PASS', subject }).key, 'spec');
-  assert.equal(run(project, 'approve', ['--run', short, '--gate', 'spec']).report.status, 'PASS');
   assert.equal(run(project, 'advance', ['--run', short, '--to', 'plan']).report.stage, 'plan');
   await writeFile(resolve(dir, 'plan.md'), 'plan');
-  assert.equal(report({ ...base, evaluator: 'plan', verdict: 'PASS', subject: run(project, 'status', ['--run', short]).report.artifacts.plan }).key, 'plan');
-  assert.equal(run(project, 'approve', ['--run', short, '--gate', 'plan']).report.status, 'PASS');
+  const passPlan = () => report({ ...base, evaluator: 'plan', verdict: 'PASS', subject: run(project, 'status', ['--run', short]).report.artifacts.plan });
+  assert.equal(passPlan().key, 'plan');
+  // Before the decision the spec can change without a command; the plan is judged again.
+  await writeFile(resolve(dir, 'spec.md'), 'spec v2');
+  assert.equal(run(project, 'approve', ['--run', short, '--gate', 'plan']).report.error.code, 'GATE', 'the changed spec is unevaluated');
+  const revised = run(project, 'status', ['--run', short]).report.artifacts.spec;
+  assert.equal(report({ ...base, evaluator: 'spec', verdict: 'PASS', subject: revised }).key, 'spec');
+  assert.equal(run(project, 'approve', ['--run', short, '--gate', 'plan']).report.error.code, 'GATE', 'the plan evaluation was discarded');
+  passPlan();
+  const { gates } = run(project, 'approve', ['--run', short, '--gate', 'plan']).report;
+  assert.deepEqual([gates.spec.status, gates.spec.by, gates.spec.artifactHash, gates.plan.status], ['approved', 'human', revised, 'approved'], 'one decision covers both');
   assert.equal(run(project, 'advance', ['--run', short, '--to', 'implement']).report.stage, 'implement');
+  assert.deepEqual(run(project, 'step', ['--run', short, '--step', 'S1,S2', '--status', 'done']).report.steps, { S1: 'done', S2: 'done' }, 'a batch is one call');
+  assert.equal(run(project, 'step', ['--run', short, '--step', 'S1,', '--status', 'done']).report.error.code, 'INVOCATION');
+  await writeFile(resolve(dir, 'spec.md'), 'spec v3');
+  assert.equal(run(project, 'advance', ['--run', short, '--to', 'verify']).report.error.code, 'GATE', 'after the decision a spec change needs a new one');
+});
+
+test('a large run still decides each gate on its own', async t => {
+  const { project, name } = await start(t, 'large');
+  await writeFile(resolve(runDir(project, name), 'spec.md'), 'spec');
+  await submit(t, project, name, { evaluator: 'spec', verdict: 'PASS', subject: `sha256:${sha('spec')}` });
+  assert.equal(run(project, 'advance', ['--run', name, '--to', 'plan']).report.error.code, 'GATE');
+  assert.equal(run(project, 'approve', ['--run', name, '--gate', 'plan']).report.error.code, 'GATE');
 });
 
 test('trivial runs have no gates and go straight to implementation', async t => {
