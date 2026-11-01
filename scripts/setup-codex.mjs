@@ -25,7 +25,9 @@ await main(async () => {
   if (existing && (!existing.isFile() || existing.isSymbolicLink())) fail('SETUP', 'AGENTS.md must be a regular file; integrate manually otherwise.');
   const previous = existing ? await readFile(agentsPath, 'utf8') : '';
   const section = await readFile(resolve(toolkit, 'templates/AGENTS.md'), 'utf8');
-  const hasSection = previous.includes(section);
+  // Formatters may add blank lines inside the section; that is not an edit.
+  const compact = text => text.replace(/\s*\n\s*/g, '\n').trim();
+  const hasSection = compact(previous).includes(compact(section));
   if (!hasSection && /<!-- personal-engineering-os:(start|end) -->/.test(previous)) fail('SETUP', 'An edited or incomplete integration section exists; review it manually.');
   const links = [
     [resolve(project, '.project-os/toolkit'), toolkit],

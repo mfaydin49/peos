@@ -54,3 +54,14 @@ test('setup requires config and creates AGENTS when absent', async t => {
   const project = await fixture(t); assert.equal(setup(project).status, 0);
   assert.match(await readFile(resolve(project, 'AGENTS.md'), 'utf8'), /personal-engineering-os:start/);
 });
+
+test('setup accepts its section after a formatter added blank lines', async t => {
+  const project = await fixture(t);
+  const section = await readFile(resolve(toolkit, 'templates/AGENTS.md'), 'utf8');
+  const formatted = `# Rules\n\n${section.replace(/\n/, '\n\n')}`;
+  await writeFile(resolve(project, 'AGENTS.md'), formatted);
+  const result = setup(project);
+  assert.equal(result.status, 0);
+  assert.equal(result.report.instructionsAppended, false);
+  assert.equal(await readFile(resolve(project, 'AGENTS.md'), 'utf8'), formatted);
+});
