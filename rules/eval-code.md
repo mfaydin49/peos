@@ -3,7 +3,13 @@
 Input: the spec (or task), the plan, `changes.diff`, `checks.json`, and the files the
 diff touches. Read the changed files around each hunk; do not judge hunks in isolation.
 `checks.json` holds results only (logs are suppressed); a failed or missing required
-check is itself blocking.
+check of the recorded phase is itself blocking. A check `SKIPPED` as outside the phase
+is not missing. A command the project's instructions ask for that no task-phase check
+runs is a `low` finding, never blocking: the configuration, not the run, is the gap.
+
+When the orchestrator says this is an evidence round, the code did not change since the
+previous report and only check evidence was missing: Read that report and `checks.json`,
+keep its criteria and non-blocking findings, and judge only that evidence.
 
 ## Focus `acceptance`
 

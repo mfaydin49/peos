@@ -25,4 +25,4 @@ tier: trivial | small
 - S1: <change> — files: <paths> — covers: AC-1 — test: <test>
 
 ## Verification
-<!-- Configured check IDs or targeted commands. -->
+<!-- Check IDs from the project configuration's task phase only. -->

@@ -44,6 +44,8 @@ async function nodeChecks(project) {
   add('tests', ['test', 'test:unit'], ['task', 'release'], 'test');
   add('typecheck', ['typecheck', 'type-check', 'check-types', 'tsc'], ['task', 'release'], 'typecheck', 300000);
   add('lint', ['lint'], ['task', 'release'], 'lint', 300000);
+  add('format', ['check-format', 'format:check', 'format-check'], ['task', 'release'], 'other', 300000);
+  add('docs', ['docs:check', 'check:docs'], ['task', 'release'], 'other', 300000);
   add('build', ['build'], ['release'], 'build');
   return checks;
 }
@@ -95,7 +97,14 @@ async function profileStatus(project) {
 function missingChecks(config, detected) {
   const script = entry => entry.args.at(-1);
   return detected.filter(entry => entry.phases.includes('task') && entry.kind !== 'test'
-    && !config.checks.some(existing => existing.id === entry.id || existing.kind === entry.kind || (existing.executable === entry.executable && script(existing) === script(entry))));
+    && !config.checks.some(existing => existing.id === entry.id || (entry.kind !== 'other' && existing.kind === entry.kind) || (existing.executable === entry.executable && script(existing) === script(entry))));
+}
+// Configured checks that AGENTS.md requires for code changes but only the release phase runs.
+// The instructions select among configured checks; they never add a command.
+async function checksToPromote(project, config) {
+  const lines = (await text(project, 'AGENTS.md') ?? '').split('\n').filter(line => /\bcode changes?\b|kod değişiklik/i.test(line));
+  const required = new Set(lines.flatMap(line => [...line.matchAll(/`(?:pnpm|npm|yarn|bun)\s+(?:run\s+)?([\w:-]+)`/g)].map(match => match[1])));
+  return config.checks.filter(entry => !entry.phases.includes('task') && required.has(entry.args.at(-1)));
 }
 // A run past implementation start is bound to the configuration, so checks are added
 // only while no run is before its release stage.
@@ -134,14 +143,17 @@ export async function setupProject(project) {
   }
   const current = await loadConfig(project);
   const missing = config === 'created' ? [] : missingChecks(current, await detectChecks(project));
+  const promoted = await checksToPromote(project, current);
+  const changes = [...missing, ...promoted];
   const label = entry => `${entry.id}: ${[entry.executable, ...entry.args].join(' ')}`;
-  const add = missing.length > 0 && !await runInProgress(project);
+  const add = changes.length > 0 && !await runInProgress(project);
   if (add) {
-    await writeJsonAtomic(resolve(project, configPath), validateConfig({ ...JSON.parse(await text(project, configPath)), checks: [...current.checks, ...missing] }));
-    config = 'updated';
+    const checks = current.checks.map(entry => promoted.includes(entry) ? { ...entry, phases: ['task', ...entry.phases] } : entry);
+    await writeJsonAtomic(resolve(project, configPath), validateConfig({ ...JSON.parse(await text(project, configPath)), checks: [...checks, ...missing] }));
+    if (config === 'existing') config = 'updated';
   }
   const instructions = Object.fromEntries(await Promise.all(instructionFiles.map(async path => [path, await exists(project, path) ? 'present' : 'missing'])));
   if (instructions['AGENTS.md'] === 'present' && instructions['CLAUDE.md'] === 'missing') instructions['CLAUDE.md'] = await linkInstructions(project);
-  return { config, configPath: resolve(project, configPath), addedChecks: add ? missing.map(label) : [], suggestedChecks: add ? [] : missing.map(label), checks: (await loadConfig(project)).checks.map(entry => `${entry.id}: ${[entry.executable, ...entry.args].join(' ')}`),
+  return { config, configPath: resolve(project, configPath), addedChecks: add ? changes.map(label) : [], suggestedChecks: add ? [] : changes.map(label), checks: (await loadConfig(project)).checks.map(entry => `${entry.id}: ${[entry.executable, ...entry.args].join(' ')}`),
     instructions, profile: { path: resolve(project, profilePath), head, ...await profileStatus(project) } };
 }

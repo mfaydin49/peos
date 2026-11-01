@@ -93,8 +93,10 @@ Run before every new run (it is fast when nothing is missing) and for `/peos:ini
    manifests when it is missing (no approval needed; tell the user in one line which
    checks it configured) and reports the instruction files and the profile. If it
    fails with `SETUP` (no test command detected), tell the user the reason and stop.
-   It also adds typecheck and lint checks the manifests declare but the configuration lacks (none
-   while a run is before its release stage; then it lists them as `suggestedChecks`) and
+   It also adds typecheck, lint, format and docs checks the manifests declare but the
+   configuration lacks, moves to the task phase the configured checks `AGENTS.md` requires
+   for code changes (neither while a run is before its release stage; then it lists them
+   as `suggestedChecks`) and
    creates `CLAUDE.md` importing an existing `AGENTS.md`.
 2. If the profile is `missing` or `stale`, `AGENTS.md` is `missing`, or this is `/peos:init`: spawn
    `peos:profiler` with the project root, `${CLAUDE_PLUGIN_ROOT}/templates/project-profile.md`,
@@ -157,7 +159,8 @@ Create the run with a short lowercase hyphenated name:
 
 Write `task.md` in the run directory (`directory` from `status --run`) from
 `${CLAUDE_PLUGIN_ROOT}/templates/run/task.md` (headings in English, content in the
-output language) with its inline plan step `S1`. There is no human gate: continue
+output language) with its inline plan step `S1`. Its Verification section names only
+check IDs of the configuration's task phase. There is no human gate: continue
 with section 4. If the work turns out larger than classified, stop and tell the user
 it needs a `standard` run.
 
@@ -222,7 +225,7 @@ are the user's consent to implement them.
    `peos-run step --run <run> --step S1,S2,S3 --status in_progress`, then spawn
    `peos:implementer` with the spec (or task) path, the plan path, the step IDs in
    order, `<directory>/map.md` and the configured check commands (`executable` and
-   `args` from the project configuration). Mark the steps it reports `DONE` in one call:
+   `args` from the project configuration) and no others. Mark the steps it reports `DONE` in one call:
    `peos-run step --run <run> --step S1,S2,S3 --status done`. If it reports a step
    `BLOCKED`, the steps after it were not started: stop and put the decision to the
    user.
@@ -248,7 +251,14 @@ are the user's consent to implement them.
    the subject. Pass `floorFlags` and `shortcuts` from `changes` to `eval-code`. For
    a `refactor` run, also tell it the run type and pass `modifiedTests`. Record each
    report.
-3. If any is `FAIL`: spawn `peos:implementer` with all blocking findings, then return to
+3. If the code did not change and every blocking finding is missing check evidence:
+   run section 5 once more, then spawn only that evaluator again, saying this is an
+   evidence round and giving its previous report (`<directory>/evals/<key>.json`),
+   `checks.json` and the subject; no implementer. Evidence comes only from `record-checks`:
+   never edit `task.md`, `spec.md` or `plan.md` after implementation to satisfy an
+   evaluator, and never pass on what an agent says it ran as evidence. A command no
+   configured check runs goes under "not verified" in the summary.
+4. Otherwise, if any is `FAIL`: spawn `peos:implementer` with all blocking findings, then return to
    section 5. The code state changes, so every code evaluation recorded so far runs
    again on the new state, plus any newly triggered one. Stop with the step-6 options
    of section 3 on `limitReached` (`/peos:retry <key>`, e.g. `code-all` or

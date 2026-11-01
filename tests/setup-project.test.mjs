@@ -33,6 +33,23 @@ test('setup writes the configuration from the manifests and never overwrites it'
   assert.deepEqual([run(project, 'setup').config, run(project, 'setup').addedChecks], ['existing', []]);
 });
 
+test('setup moves checks AGENTS.md requires for code changes to the task phase', async t => {
+  const project = await repository(t);
+  await saveConfig(project, config([{ id: 'unit', executable: 'node', args: ['-e', '0'], phases: ['task'], required: true, timeoutMs: 1000 },
+    { id: 'build', executable: 'npm', args: ['run', 'build'], phases: ['release'], required: true, timeoutMs: 1000 },
+    { id: 'preview', executable: 'npm', args: ['run', 'preview'], phases: ['release'], required: true, timeoutMs: 1000 }]));
+  await writeFile(resolve(project, 'package.json'), JSON.stringify({ scripts: { build: 'x', preview: 'x', 'docs:check': 'x', 'check-format': 'x' } }));
+  await writeFile(resolve(project, 'AGENTS.md'), 'pnpm preview is listed here.\nCode changes: `pnpm build`, `pnpm deploy`.\n');
+  commit(project);
+  const report = run(project, 'setup');
+  assert.deepEqual(report.addedChecks, ['format: npm run check-format', 'docs: npm run docs:check', 'build: npm run build']);
+  const { checks } = JSON.parse(await readFile(resolve(project, '.project-os/engineering.config.json'), 'utf8'));
+  assert.deepEqual(checks.find(entry => entry.id === 'build').phases, ['task', 'release']);
+  assert.deepEqual(checks.find(entry => entry.id === 'preview').phases, ['release'], 'only the code-change line counts');
+  assert.ok(!checks.some(entry => entry.args.includes('deploy')), 'instructions never add a command');
+  assert.equal(run(project, 'setup').config, 'existing');
+});
+
 test('setup leaves the configuration alone while a run is in progress', async t => {
   const project = await repository(t);
   await saveConfig(project, config());
