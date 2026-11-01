@@ -39,38 +39,33 @@ increment 6; see the [v2 design](docs/design/peos-v2-plugin.md).
 
 The project needs a Git repository with at least one commit, and a root test command
 PEOS can detect (a `test` script in `package.json`, pytest, `go test`, `cargo test`,
-`swift test` or Gradle). Otherwise setup stops and tells you what is missing.
+`swift test` or Gradle). Otherwise install stops and tells you what is missing.
 
-1. Open Claude Code in the project with the plugin loaded:
+Install once per project:
 
-   ```sh
-   cd /path/to/project
-   claude --plugin-dir /path/to/personal-engineering-os
-   ```
+```sh
+node /path/to/personal-engineering-os/scripts/install.mjs --project /path/to/project
+```
 
-   Or install it once from the local marketplace, inside Claude Code:
+Then open a new session in the project; no flags are needed. Repeating the command is
+safe, and nothing is committed. Review the configured checks in
+`.project-os/engineering.config.json`: PEOS runs them as commands.
 
-   ```text
-   /plugin marketplace add /path/to/personal-engineering-os
-   /plugin install peos@peos-local
-   ```
+| Tool | What install connects | How you use it |
+| --- | --- | --- |
+| Claude Code | The `peos` plugin for this project (`.claude/settings.local.json`), reading this toolkit directory | `/peos:start <request>`, with agents, evaluators and enforced gates |
+| Codex | `AGENTS.md` and `.agents/skills` | Write your request in chat, or use `$peos-task-planning` |
+| GitHub Copilot in VS Code | `AGENTS.md` and `.agents/skills` | Write your request in chat |
 
-2. Prepare the project (optional, `/peos:start` does the same when something is missing):
+Only Claude Code gets the full pipeline. In Codex and Copilot the same workflow is
+followed as instructions: no hooks enforce the gates and no run state is kept. Move the
+toolkit and you need to install again.
 
-   ```text
-   /peos:init
-   ```
+Describe the work in your own words:
 
-   This writes `.project-os/engineering.config.json` from the project's manifests and
-   `.project-os/project-profile.md`, creates `AGENTS.md` and `CLAUDE.md` when missing,
-   and leaves them uncommitted for you to review. Review the configured checks: PEOS
-   runs them as commands.
-
-3. Describe the work in your own words:
-
-   ```text
-   /peos:start Add CSV export to the reports page.
-   ```
+```text
+/peos:start Add CSV export to the reports page.
+```
 
 PEOS investigates the request and picks a type and a tier. Override either one in the
 request:

@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, realpath as realpathOf, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
-import { basename, resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { config, git, jsonCli, repository, saveConfig, toolkit } from './helpers.mjs';
 import { detectChecks } from '../scripts/lib/setup.mjs';
 import { sessionCalls, summarizeUsage, totals } from '../scripts/lib/usage.mjs';
@@ -188,4 +188,40 @@ test('a spec over its criteria limit is reported and refused', async t => {
   assert.equal(record(spec(11)).error.code, 'SPEC_SIZE');
   await writeFile(resolve(directory, 'spec.md'), spec(10));
   assert.equal(record(spec(10)).verdict, 'PASS');
+});
+
+test('install prepares a project once for every host and can be repeated', async t => {
+  const project = await repository(t);
+  await writeFile(resolve(project, 'package.json'), JSON.stringify({ scripts: { test: 'vitest run' } }));
+  await writeFile(resolve(project, 'keep.txt'), 'mine');
+  commit(project);
+  const stub = await repository(t);
+  const calls = resolve(stub, 'calls');
+  await writeFile(resolve(stub, 'claude'), `#!/bin/sh\necho "$PWD $*" >> "${calls}"\n`);
+  await chmod(resolve(stub, 'claude'), 0o755);
+  const install = (path = `${stub}:${process.env.PATH}`) => jsonCli('install.mjs', ['--project', project], { env: { ...process.env, PATH: path } }).report;
+  const first = install();
+  assert.deepEqual([first.status, first.claude, first.instructions], ['PASS', 'installed', { 'AGENTS.md': 'present', 'CLAUDE.md': 'created' }]);
+  const logged = (await readFile(calls, 'utf8')).trim().split('\n');
+  assert.match(logged[0], /plugin marketplace add .* --scope local$/);
+  assert.match(logged[1], /plugin install peos@peos-local --scope local$/);
+  assert.ok(logged[0].startsWith(await realpathOf(project)), 'runs in the project');
+  assert.match(await readFile(resolve(project, 'AGENTS.md'), 'utf8'), /personal-engineering-os:start/);
+  assert.equal(await readFile(resolve(project, 'CLAUDE.md'), 'utf8'), '@AGENTS.md\n');
+  assert.ok(await readFile(resolve(project, '.agents/skills/peos-task-planning/SKILL.md'), 'utf8'));
+  assert.equal(git(project, 'status', '--short', '--', '.project-os/toolkit', '.agents'), '', 'links stay out of commits');
+  assert.equal(install().status, 'PASS');
+  const exclude = await readFile(resolve(project, '.git/info/exclude'), 'utf8');
+  assert.equal(exclude.split('\n').filter(line => line === '.project-os/toolkit').length, 1, 'repeating adds nothing');
+  assert.equal(install(`/usr/bin:${dirname(process.execPath)}`).claude, 'skipped: claude is not installed');
+  assert.equal(await readFile(resolve(project, 'keep.txt'), 'utf8'), 'mine');
+});
+
+test('install stops before changing a project it cannot set up', async t => {
+  const project = await repository(t);
+  await writeFile(resolve(project, 'readme.txt'), 'no manifest');
+  commit(project);
+  assert.equal(jsonCli('install.mjs', ['--project', project]).report.error.code, 'SETUP');
+  await assert.rejects(readFile(resolve(project, 'AGENTS.md')));
+  assert.equal(jsonCli('install.mjs', ['--project', toolkit]).report.error.code, 'INSTALL');
 });
