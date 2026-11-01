@@ -11,6 +11,9 @@ When the orchestrator says this is an evidence round, the code did not change si
 previous report and only check evidence was missing: Read that report and `checks.json`,
 keep its criteria and non-blocking findings, and judge only that evidence.
 
+List in `notAssessed` whatever you could not observe, such as a user interface change
+nobody rendered. A code reading and passing checks do not show how a screen looks.
+
 ## Focus `acceptance`
 
 For each `AC-n`, report `met` only with concrete evidence: the test name that exercises

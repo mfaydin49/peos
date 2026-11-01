@@ -250,6 +250,6 @@ with section 4 here. Trivial and small runs skip it.
 
 ## Final report
 
-End every turn with: run name, stage, gate states, what you ran, the `usage` line from
-`peos-run status` when there is one (say so when it is over budget), and the next
+End every turn with: run name, stage, gate states, what you ran, the `usage` from
+`peos-run brief` when there is one (say so when it is over budget), and the next
 action the user can take. Do not claim checks or evaluations that did not run.
