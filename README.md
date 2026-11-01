@@ -30,19 +30,88 @@ Host sandbox and device trust prompts remain independent.
 
 ## Claude Code plugin (preview)
 
-This directory is also a Claude Code plugin (`peos`) and a local marketplace. It adds
-`/peos:init`, `/peos:start`, `/peos:continue`, `/peos:status`, `/peos:approve`, `/peos:revise` and `/peos:retry`,
-which drive a run through spec, plan, implementation, recorded checks and independent
-code and security evaluation, with human gates, up to the release stage. The release
-report and PR flow arrive in increment 6; see the [v2 design](docs/design/peos-v2-plugin.md). Try it for one session without installing:
+This directory is also a Claude Code plugin (`peos`) and a local marketplace. It drives
+a run through spec, plan, implementation, recorded checks and independent code and
+security evaluation up to the release stage. The release report and PR flow arrive in
+increment 6; see the [v2 design](docs/design/peos-v2-plugin.md).
 
-```sh
-claude --plugin-dir /path/to/personal-engineering-os
+### Start in a new project
+
+The project needs a Git repository with at least one commit, and a root test command
+PEOS can detect (a `test` script in `package.json`, pytest, `go test`, `cargo test`,
+`swift test` or Gradle). Otherwise setup stops and tells you what is missing.
+
+1. Open Claude Code in the project with the plugin loaded:
+
+   ```sh
+   cd /path/to/project
+   claude --plugin-dir /path/to/personal-engineering-os
+   ```
+
+   Or install it once from the local marketplace, inside Claude Code:
+
+   ```text
+   /plugin marketplace add /path/to/personal-engineering-os
+   /plugin install peos@peos-local
+   ```
+
+2. Prepare the project (optional, `/peos:start` does the same when something is missing):
+
+   ```text
+   /peos:init
+   ```
+
+   This writes `.project-os/engineering.config.json` from the project's manifests and
+   `.project-os/project-profile.md`, creates `AGENTS.md` and `CLAUDE.md` when missing,
+   and leaves them uncommitted for you to review. Review the configured checks: PEOS
+   runs them as commands.
+
+3. Describe the work in your own words:
+
+   ```text
+   /peos:start Add CSV export to the reports page.
+   ```
+
+PEOS investigates the request and picks a type and a tier. Override either one in the
+request:
+
+```text
+/peos:start --tier standard --type fix Login fails after a password reset.
 ```
 
-A `standard` run asks for one decision: `/peos:approve` after the spec and plan both
-pass evaluation. Gate decisions take effect only right after you type the command yourself; see design §12
+### Commands
+
+| Command | Use it to |
+| --- | --- |
+| `/peos:init` | Prepare a project, or refresh its profile, without starting a run. |
+| `/peos:start <request>` | Start a run. Options: `--type app\|feature\|change\|fix\|refactor`, `--tier trivial\|small\|standard\|large`. |
+| `/peos:status [run]` | See runs, or the stage, evaluations, checks and token use of one run. Changes nothing. |
+| `/peos:approve [gate] [run]` | Approve the pending decision. |
+| `/peos:revise <spec\|plan> [--run <name>] <feedback>` | Send a spec or plan back with your feedback. |
+| `/peos:continue [run]` | Resume an unfinished run, also in a new session. |
+| `/peos:retry <evaluation> [run]` | Try again after an evaluation hit its three-round limit, for example `/peos:retry code-all`. |
+
+### What happens in a run
+
+| Tier | Typical work | Your decisions |
+| --- | --- | --- |
+| `trivial` | One file, a few lines | None |
+| `small` | One concern, about 5 files, no user-level choice | None |
+| `standard` | A real user-level choice, or a change to a trust boundary | One `/peos:approve` after the spec and plan both pass evaluation |
+| `large` | New application or several open questions | Arrives in increment 7 |
+
+The agent asks a question only when the choice is yours. Implementation, checks and
+evaluation then run on their own. A run ends at the release stage with a summary in
+`.project-os/runs/<run>/summary.md`.
+
+Nothing is committed, pushed, deployed or migrated for you: the change stays in your
+working tree. Review it, open it in the app, then commit it yourself.
+
+Decisions take effect only right after you type the command yourself. See design §12
 for what the hooks do and do not guarantee.
+
+Start each run in a new session when you can: agents and hooks load at session start,
+and a long conversation is read again on every model call, which costs the most tokens.
 
 ## Requirements
 
@@ -96,5 +165,4 @@ from runtime evidence. End-to-end model invocation and desktop UI routing remain
 unverified. Integration uses local symlinks: moving the toolkit can break them.
 Raw check logs are suppressed, reference paths are lexically contained (not a symlink
 sandbox), and Git discovery is bounded and assumes UTF-8 paths. Review configured
-commands and their side effects before execution. Future hooks or plugin packaging
-would require a separately justified extension; neither is implemented here.
+commands and their side effects before execution.
