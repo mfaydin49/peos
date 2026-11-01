@@ -139,6 +139,13 @@ async function status(project, options) {
   // Artifact hashes are what spec and plan evaluators must name as their subject.
   return { run: state.run, directory, state, codeState, ...(codeStateError ? { codeStateError } : {}), artifacts, assessment, usage, specSize: await specSize(directory, state) };
 }
+// The orchestrator's view of a run: only what it acts on, since its context is read again on every turn.
+async function brief(project, options) {
+  if (options.run === undefined) fail('INVOCATION', '--run is required.');
+  const { run, directory, state, artifacts, assessment, usage, specSize: size } = await status(project, options);
+  const evals = Object.fromEntries(Object.entries(assessment.evals).map(([key, { verdict, round, fresh }]) => [key, { verdict, round, fresh }]));
+  return { run, directory, type: state.type, tier: state.tier, stage: state.stage, gates: assessment.gates, evals, steps: state.steps, artifacts, usage, specSize: size };
+}
 async function recordChecks(project, options) {
   const directory = await runDirectory(project, options.run);
   await readState(directory);
@@ -350,7 +357,7 @@ async function map(project, options) {
   const directory = await runDirectory(project, options.run);
   const mapPath = resolve(directory, 'map.md');
   await writeAtomic(mapPath, `# Code map\n\nTop-level names per folder (regex-based; nested and dynamic definitions are missed).\n\n${result.map}\n`);
-  return { ...result, mapPath };
+  return { folders: result.folders, mapPath };
 }
 // Evaluator input: the net code diff against the run's base commit (excluding run files) and security triggers.
 async function changes(project, options) {
@@ -417,7 +424,26 @@ async function step(project, options) {
   });
 }
 
-const handlers = { init, status, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step, grant, changes, 'record-baseline': recordBaseline, map, setup,
+// One call for the bookkeeping around an implementer: entering implementation with its
+// map and steps, and from finished steps through recorded checks to the evaluator input.
+async function begin(project, options) {
+  await advance(project, { ...options, to: 'implement' });
+  const { mapPath } = await map(project, options);
+  const { steps } = await step(project, { ...options, status: 'in_progress' });
+  return { run: options.run, stage: 'implement', steps, mapPath };
+}
+async function finish(project, options) {
+  if (options.step !== undefined) await step(project, { ...options, status: 'done' });
+  await advance(project, { ...options, to: 'verify' });
+  const { report: { checks }, exitCode } = await recordChecks(project, { ...options, phase: 'task' });
+  const failed = checks.checks.filter(check => !['PASS', 'SKIPPED'].includes(check.status)).map(check => check.id);
+  const summary = { checks: checks.status, verification: checks.verification, failed };
+  if (checks.status !== 'PASS') return { report: { run: options.run, stage: 'verify', ...summary }, exitCode };
+  await advance(project, { ...options, to: 'evaluate' });
+  return { report: { stage: 'evaluate', ...summary, ...await changes(project, options) }, exitCode };
+}
+
+const handlers = { init, status, brief, begin, finish, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step, grant, changes, 'record-baseline': recordBaseline, map, setup,
   fingerprint: project => fingerprint(project) };
 
 await main(async () => {
@@ -426,7 +452,7 @@ await main(async () => {
   const options = parseArgs(rest, actions[action]);
   const project = await projectDirectory(options.project);
   const outcome = await handlers[action](project, options);
-  const { report, exitCode = 0 } = ['record-checks', 'record-baseline'].includes(action) ? outcome : { report: outcome };
+  const { report, exitCode = 0 } = ['record-checks', 'record-baseline', 'finish'].includes(action) ? outcome : { report: outcome };
   return { report: { reportVersion: 1, kind: 'run-state', action, status: 'PASS', ...report }, exitCode };
 }, report => {
   if (report.action === 'status' && report.runs) return report.runs.length
@@ -453,6 +479,7 @@ await main(async () => {
     ...Object.entries(report.instructions).map(([file, state]) => `${file}: ${state}`),
     `profile: ${report.profile.status}${report.profile.reason ? ` (${report.profile.reason})` : ''}`
   ].join('\n');
+  if (report.action === 'finish') return `${report.run}: ${report.checks} checks, stage ${report.stage}${report.failed.length ? `, failed: ${report.failed.join(', ')}` : ''}`;
   if (report.action === 'init') return `Run ${report.run} created at ${JSON.stringify(report.directory)}.`;
   return `${report.action}: ${report.run} updated.`;
 });

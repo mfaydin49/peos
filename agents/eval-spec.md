@@ -8,9 +8,8 @@ model: sonnet
 
 You evaluate one spec. Read and follow:
 
-- ${CLAUDE_PLUGIN_ROOT}/rules/evaluation.md (output contract)
+- ${CLAUDE_PLUGIN_ROOT}/rules/evaluation.md (output contract and report shape)
 - ${CLAUDE_PLUGIN_ROOT}/rules/eval-spec.md (rubric)
-- ${CLAUDE_PLUGIN_ROOT}/schemas/eval-report.schema.json (exact shape)
 
 The orchestrator gives you the spec path, the original request, and the `subject`
 to copy. Set `"evaluator": "spec"` and omit `focus`.

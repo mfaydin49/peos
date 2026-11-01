@@ -21,7 +21,7 @@ agents produce and judge. Design reference: ${CLAUDE_PLUGIN_ROOT}/docs/design/pe
   write decision files: the plugin blocks it. On a `GRANT` refusal, tell the user
   which command to type. A `standard` run has one decision: `/peos:approve` at the plan
   gate also approves the spec. A `large` run decides each gate with its own command.
-- The run directory is `${CLAUDE_PROJECT_DIR}/.project-os/runs/<run>/`; `status --run`
+- The run directory is `${CLAUDE_PROJECT_DIR}/.project-os/runs/<run>/`; `brief --run`
   returns it as `directory`. Write run artifacts only there; the only other files you
   write are those of section 0. `--run` accepts the dated run name or the name alone.
 - If a tool call is denied by the PEOS guard, do not look for another way to do the
@@ -152,98 +152,65 @@ tail, a request with verbose output), then spawn the investigator again with it.
 never access production yourself. Pass the evidence to the spec-writer word for word,
 without secrets or personal data.
 
+Use `peos-run brief --run <run>` whenever you need a run's state; `status` is for the user.
 Create the run with a short lowercase hyphenated name:
 `peos-run init --name <name> --type <type> --tier <tier>`.
 
 ## 2. Trivial and small
 
-Write `task.md` in the run directory (`directory` from `status --run`) from
+Write `task.md` in the run directory (`directory` from `init`) from
 `${CLAUDE_PLUGIN_ROOT}/templates/run/task.md` (headings in English, content in the
 output language) with its inline plan step `S1`. Its Verification section names only
 check IDs of the configuration's task phase. There is no human gate: continue
 with section 4. If the work turns out larger than classified, stop and tell the user
 it needs a `standard` run.
 
-## 3. Standard: produce → evaluate → one decision
+## 3. Standard
 
-For each stage, in order `spec`, then `plan`:
-
-| Stage | Producer | Template | Artifact | Evaluator |
-| --- | --- | --- | --- | --- |
-| spec | `peos:spec-writer` | `templates/run/spec.md` | `spec.md` | `peos:eval-spec` |
-| plan | `peos:planner` | `templates/run/plan.md` | `plan.md` | `peos:eval-plan` |
-
-1. `peos-run advance --to <stage>`.
-2. Spawn the producer. Before the first planner, run `peos-run map --run <run>` and give
-   it `<directory>/map.md`. Give the spec-writer the request, the evidence and every
-   answer the user has already given. On `STATUS: QUESTIONS`, drop the questions the
-   project or the evidence answers, ask the rest in one round (see Fixed rules), then
-   spawn the producer again with all answers.
-3. On `STATUS: DRAFT`, the producer has written `<directory>/<artifact>`; keep its
-   summary lines for step 7 and do not read the artifact yourself.
-4. `peos-run status --run <run>` and take `artifacts.<stage>` as the subject (missing:
-   the producer did not write it; spawn it again once). If `specSize.over` is true,
-   spawn the spec-writer once more to merge criteria down to `specSize.limit`;
-   `record-eval` refuses an oversized spec (`SPEC_SIZE`).
-5. Spawn the evaluator and record its report (see Fixed rules). On a later round also
-   give it the previous `blocking` findings and the producer's summary of what changed.
-6. `FAIL`: spawn the producer again with the findings; repeat from 3. A finding that is
-   a reversible detail gets a default, not a question. Stop and ask the
-   user when `record-eval` returns `limitReached: true` (third failed round) or
-   `plateau: true` (the same blocking findings two rounds in a row). Show the remaining
-   blocking findings and the user's options: `/peos:revise <stage> <feedback>` to
-   redirect the work, `/peos:retry <key>` to try again as is, or stop.
-   `BLOCKED`: report what the evaluator could not assess and ask the user.
-7. Spec `PASS`: say so in one line and continue with the plan stage in the same turn.
-   Plan `PASS`: show both producers' summary lines together (at most about eight lines),
-   the count of remaining non-blocking findings and both artifact paths, then end your
-   turn with: approve with `/peos:approve`, or request changes with
-   `/peos:revise <spec|plan> <feedback>`.
-
-Until that approval the spec is not frozen. When a user's answer or an evaluator finding
-at the plan stage changes the spec, spawn the spec-writer with the change, evaluate the
-new spec, then revise the plan and evaluate it; do not ask for `/peos:revise`. Recording
-the new spec evaluation discards the plan evaluation. Once the gates are approved, a
-change of scope needs the user's `/peos:revise`.
-
-After the approval, continue with section 4 in the same turn: the approved spec and plan
-are the user's consent to implement them.
+Read ${CLAUDE_PLUGIN_ROOT}/skills/orchestrator/standard.md, follow it, then continue
+with section 4 here. Trivial and small runs skip it.
 
 ## 4. Implement
 
-1. `peos-run advance --to implement`. For a `refactor` run only, before the first step:
+1. `peos-run begin --run <run> --step S1,S2,S3`, naming the first batch: it enters the
+   implement stage, writes `<directory>/map.md` and marks the steps `in_progress`. For a
+   `refactor` run only, before the implementer:
    `peos-run record-baseline --run <run>` records the full task checks on the untouched
    code. If it is not `PASS`, stop: the existing checks must be green before a refactor
    starts; show the user which checks fail. Release refuses a refactor without it. If it
    refuses with `BASELINE` (code already changed since implementation started), stop and
    tell the user: restore that state (they can stash the changes) or start a new run.
-2. Run `peos-run map --run <run>` once. Then work through the plan steps in order
+2. Work through the plan steps in order
    (trivial and small runs: `task.md` is both the spec and the plan, with step `S1`)
    with one implementer per batch, not one per step: a batch is every remaining step
    in order, except that steps marked `Parallel: yes` whose files do not overlap may
-   go to separate implementers spawned together. Mark the whole batch in one call,
-   `peos-run step --run <run> --step S1,S2,S3 --status in_progress`, then spawn
+   go to separate implementers spawned together. Spawn
    `peos:implementer` with the spec (or task) path, the plan path, the step IDs in
    order, `<directory>/map.md` and the configured check commands (`executable` and
-   `args` from the project configuration) and no others. Mark the steps it reports `DONE` in one call:
-   `peos-run step --run <run> --step S1,S2,S3 --status done`. If it reports a step
+   `args` from the project configuration) and no others. When steps remain after a batch, mark it with
+   `peos-run step --run <run> --step S1,S2,S3 --status done` and the next one
+   `in_progress` the same way. After the last batch go to section 5. If it reports a step
    `BLOCKED`, the steps after it were not started: stop and put the decision to the
    user.
 
 ## 5. Verify
 
-1. `peos-run advance --to verify`, then `peos-run record-checks --run <run> --phase task`.
-   On `CONFIG_MISSING`, run section 0 and record again; never write check commands
+1. `peos-run finish --run <run> --step S1,S2,S3`, naming the steps reported `DONE` (omit
+   `--step` when none are new). It marks them, records the task checks and, when they
+   pass, moves to the evaluate stage and returns the evaluator input of section 6.
+   On `CONFIG_MISSING`, run section 0 and call it again; never write check commands
    yourself.
-2. On `FAIL` or `BLOCKED`, spawn `peos:implementer` with the failing check IDs and their
-   commands (logs are suppressed; it reruns them itself), then record checks again. After
+2. When it returns `failed` checks (stage `verify`), spawn `peos:implementer` with those
+   check IDs and their commands (logs are suppressed; it reruns them itself), then call
+   `finish` again. After
    three failed attempts, stop and show the user which checks still fail.
 
 ## 6. Evaluate
 
-1. `peos-run advance --to evaluate`, then `peos-run changes --run <run>`. It returns
-   `codeState` (the subject), `diffPath`, the changed files and `securityTriggers`.
-2. Spawn in parallel: `peos:eval-code` with focus `all`; `peos:eval-security` when
+1. `finish` returned `codeState` (the subject), `diffPath`, the changed files and
+   `securityTriggers`. On a resume at this stage, `peos-run changes --run <run>` returns them.
+2. Spawn in parallel: `peos:eval-code` with focus `all` (on trivial and small runs, spawn
+   it with `model: sonnet`; the agent's default is for standard runs); `peos:eval-security` when
    `securityTriggers` is not empty **or** a `security` evaluation was recorded earlier
    in this run (every recorded code evaluation must PASS on the final code state).
    Give each the spec (or task) path, the plan path (`task.md` again for trivial and
@@ -252,7 +219,7 @@ are the user's consent to implement them.
    a `refactor` run, also tell it the run type and pass `modifiedTests`. Record each
    report.
 3. If the code did not change and every blocking finding is missing check evidence:
-   run section 5 once more, then spawn only that evaluator again, saying this is an
+   call `finish` once more, then spawn only that evaluator again, saying this is an
    evidence round and giving its previous report (`<directory>/evals/<key>.json`),
    `checks.json` and the subject; no implementer. Evidence comes only from `record-checks`:
    never edit `task.md`, `spec.md` or `plan.md` after implementation to satisfy an
@@ -260,9 +227,9 @@ are the user's consent to implement them.
    configured check runs goes under "not verified" in the summary.
 4. Otherwise, if any is `FAIL`: spawn `peos:implementer` with all blocking findings, then return to
    section 5. The code state changes, so every code evaluation recorded so far runs
-   again on the new state, plus any newly triggered one. Stop with the step-6 options
-   of section 3 on `limitReached` (`/peos:retry <key>`, e.g. `code-all` or
-   `security`) or on a plateau. `BLOCKED`: report what could not be assessed and ask
+   again on the new state, plus any newly triggered one. On `limitReached` or a plateau, stop and
+   show the blocking findings and the options: `/peos:retry <key>` (e.g. `code-all` or
+   `security`) to try again, or stop. `BLOCKED`: report what could not be assessed and ask
    the user.
 
 ## 7. Release stage
@@ -280,23 +247,6 @@ are the user's consent to implement them.
    increment 6".
 3. End the turn: the change is in the working tree, uncommitted, for the user to
    review. Nothing is committed, pushed or deployed.
-
-## 8. Resume
-
-Read `peos-run status --run <run>` and act on the first row that applies:
-
-| Condition | Action |
-| --- | --- |
-| An evaluation is non-PASS at round 3 | Show its blocking findings and the options of section 3 step 6; stop. |
-| A gate's approval is stale (artifact changed after approval) | Say which artifact changed; it needs a new evaluation and approval (section 3). |
-| A gate is pending or revision-requested without a fresh PASS evaluation | Section 3 for that stage, with the user's feedback on a revision. |
-| A standard run's spec evaluation PASSed but its plan has none | Section 3, plan stage; the spec is approved together with the plan. |
-| A gate has a fresh PASS evaluation awaiting approval | Remind the user of `/peos:approve` and `/peos:revise <gate> …`. |
-| A refactor has no baseline (`status` says so) | Record it if no step changed code yet; otherwise the `BASELINE` instruction of section 4.1. |
-| Stage `implement` with steps not `done` | Section 4: its step 1 first (safe to repeat; binds older runs), then from the first unfinished step. |
-| Stage `verify` | Section 5. |
-| Stage `evaluate` | Section 6 (stale evaluations run again). |
-| Stage `release` | Report the summary path. |
 
 ## Final report
 

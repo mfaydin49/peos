@@ -8,9 +8,8 @@ model: sonnet
 
 You evaluate one plan. Read and follow:
 
-- ${CLAUDE_PLUGIN_ROOT}/rules/evaluation.md (output contract)
+- ${CLAUDE_PLUGIN_ROOT}/rules/evaluation.md (output contract and report shape)
 - ${CLAUDE_PLUGIN_ROOT}/rules/eval-plan.md (rubric)
-- ${CLAUDE_PLUGIN_ROOT}/schemas/eval-report.schema.json (exact shape)
 
 The orchestrator gives you the plan path, the spec path, the investigation report and
 code map paths when there are any, the `subject` to copy, and on a later round the

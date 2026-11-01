@@ -315,6 +315,9 @@ node /path/to/personal-engineering-os/scripts/peos-run.mjs setup --project /path
   consecutive non-PASS rounds at three; the third failed round returns
   `limitReached: true`. `reset-eval` clears one key after the human decides to continue.
   Recording a spec evaluation for changed content discards the plan evaluation.
+- `brief` is a short `status` for one run. `begin` enters `implement`, writes the map and
+  marks steps `in_progress`. `finish` marks steps `done`, records the task checks and, when
+  they pass, moves to `evaluate` and returns what `changes` returns.
 - `approve` requires earlier gates to be fresh and a fresh PASS evaluation of the
   gate's artifact. On a `standard` run, approving `plan` also approves an unapproved
   spec whose evaluation PASSed on the current `spec.md`. An approval goes stale when its artifact or an earlier approved

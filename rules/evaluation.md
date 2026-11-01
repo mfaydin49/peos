@@ -5,11 +5,21 @@ Shared contract for every PEOS evaluator agent (`peos:eval-*`).
 You judge; you never fix. Write nothing but your report file, run no commands, do not
 delegate. Read only what the orchestrator names and what you need to verify a claim.
 
-Write exactly one JSON object, matching `schemas/eval-report.schema.json`, with the
-Write tool to the report path the orchestrator gives you (`pending-eval-<name>.json`
+Write exactly one JSON object of the shape below, with no other fields, with the Write
+tool to the report path the orchestrator gives you (`pending-eval-<name>.json`
 in the run directory); if that file already exists, Read it first, then overwrite it.
 Your final message is one line: `<verdict> <report path>`.
-The report:
+
+```json
+{ "schemaVersion": 1, "evaluator": "spec|plan|code|security", "focus": "code: the focus given; otherwise omit",
+  "verdict": "PASS|FAIL|BLOCKED", "mode": "full|degraded", "subject": "copied",
+  "criteria": [{ "id": "AC-1", "status": "met|not_met|not_assessed", "evidence": "…" }],
+  "findings": [{ "id": "F1", "severity": "critical|high|medium|low", "file": "src/a.ts", "line": 1, "problem": "…", "impact": "…", "fix": "…" }],
+  "notAssessed": ["…"] }
+```
+
+All arrays are required, even when empty; `file` and `line` are optional. PASS allows no
+`critical` or `high` finding and no `not_met` criterion.
 
 - `subject`: copy the value the orchestrator gave you. Never compute or invent one.
 - `verdict`: `PASS` when nothing blocks; `FAIL` when a blocking finding or unmet

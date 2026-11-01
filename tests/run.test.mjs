@@ -291,6 +291,29 @@ test('the documented standard procedure runs end to end through the plan gate', 
   assert.equal(run(project, 'advance', ['--run', short, '--to', 'verify']).report.error.code, 'GATE', 'after the decision a spec change needs a new one');
 });
 
+test('begin and finish replace the bookkeeping calls around an implementer', async t => {
+  const { project, name } = await start(t, 'small');
+  const begun = run(project, 'begin', ['--run', name, '--step', 'S1,S2']).report;
+  assert.deepEqual([begun.stage, begun.steps], ['implement', { S1: 'in_progress', S2: 'in_progress' }]);
+  assert.match(await readFile(begun.mapPath, 'utf8'), /Code map/);
+  await writeFile(resolve(project, 'a.txt'), 'change');
+  const finished = run(project, 'finish', ['--run', name, '--step', 'S1,S2']);
+  assert.deepEqual([finished.report.stage, finished.report.checks, finished.report.failed], ['evaluate', 'PASS', []]);
+  assert.ok(finished.report.codeState.startsWith('fp:') && finished.report.diffPath);
+  const brief = run(project, 'brief', ['--run', name]).report;
+  assert.deepEqual([brief.stage, brief.steps, brief.tier], ['evaluate', { S1: 'done', S2: 'done' }, 'small']);
+  assert.ok(!Object.hasOwn(brief, 'state'));
+  assert.equal(run(project, 'brief').report.error.code, 'INVOCATION');
+});
+
+test('finish stops at verify and names the failing checks', async t => {
+  const { project, name } = await start(t, 'small', [check('tests', 'process.exit(1)')]);
+  run(project, 'begin', ['--run', name, '--step', 'S1']);
+  const failed = run(project, 'finish', ['--run', name, '--step', 'S1']);
+  assert.deepEqual([failed.report.stage, failed.report.checks, failed.report.failed], ['verify', 'FAIL', ['tests']]);
+  assert.equal(run(project, 'status', ['--run', name]).report.state.stage, 'verify');
+});
+
 test('a large run still decides each gate on its own', async t => {
   const { project, name } = await start(t, 'large');
   await writeFile(resolve(runDir(project, name), 'spec.md'), 'spec');

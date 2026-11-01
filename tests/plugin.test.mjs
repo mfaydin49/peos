@@ -20,7 +20,7 @@ async function document(path) {
 const list = value => value.split(',').map(item => item.trim()).filter(Boolean);
 const agentFiles = (await readdir(resolve(toolkit, 'agents'))).filter(name => name.endsWith('.md'));
 const skillNames = (await readdir(resolve(toolkit, 'skills'), { withFileTypes: true })).filter(entry => entry.isDirectory()).map(entry => entry.name);
-const pluginFiles = [...agentFiles.map(name => resolve(toolkit, 'agents', name)), ...skillNames.map(name => resolve(toolkit, 'skills', name, 'SKILL.md'))];
+const pluginFiles = [...agentFiles.map(name => resolve(toolkit, 'agents', name)), ...skillNames.map(name => resolve(toolkit, 'skills', name, 'SKILL.md')), resolve(toolkit, 'skills/orchestrator/standard.md'), resolve(toolkit, 'skills/orchestrator/resume.md')];
 
 test('plugin and marketplace manifests agree with the package', async () => {
   const plugin = await json('.claude-plugin/plugin.json');
@@ -62,7 +62,7 @@ test('skills are named after their directory and gate decisions are user-only', 
 test('plugin paths, Markdown links and peos-run commands referenced by plugin files exist', async () => {
   let commands = 0;
   for (const path of pluginFiles) {
-    const { source } = await document(path);
+    const source = await readFile(path, 'utf8');
     for (const [, target] of source.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/([^\s`"')]+)/g)) {
       await access(resolve(toolkit, target.replace(/[.,:;]$/, '')));
     }

@@ -18,5 +18,5 @@ once; on a `standard` run, `plan` also approves the spec.
    It refuses unless the user's command was just recorded, the gate's evaluation
    PASSed on the current artifact and earlier gates hold. Report a refusal as is; do
    not work around it.
-2. On success, read ${CLAUDE_PLUGIN_ROOT}/skills/orchestrator/SKILL.md and continue
-   the run from its Resume section. Stop at the next gate; it needs its own approval.
+2. On success, read ${CLAUDE_PLUGIN_ROOT}/skills/orchestrator/SKILL.md and
+   ${CLAUDE_PLUGIN_ROOT}/skills/orchestrator/resume.md and continue the run from there. Stop at the next gate; it needs its own approval.
