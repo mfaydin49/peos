@@ -5,8 +5,8 @@ argument-hint: "[run name]"
 disable-model-invocation: true
 ---
 
-Read ${CLAUDE_PLUGIN_ROOT}/skills/orchestrator/SKILL.md for its Fixed rules, then
-${CLAUDE_PLUGIN_ROOT}/skills/orchestrator/resume.md and follow it.
+Read ${CLAUDE_PLUGIN_ROOT}/skills/orchestrator/SKILL.md and continue the run with its
+section 2 (Loop): `next` knows where the run stopped.
 
 Run (dated or short name, optional): $ARGUMENTS
 

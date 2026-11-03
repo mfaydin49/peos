@@ -57,7 +57,13 @@ function plainObject(value, where) {
 export function validateState(input) {
   plainObject(input, 'root');
   const fields = ['schemaVersion', 'run', 'type', 'tier', 'stage', 'gates', 'steps', 'evals', 'checkpoints', 'createdAt', 'updatedAt'];
-  if (Object.keys(input).some(key => !fields.includes(key) && !['configHash', 'baseHead', 'baseCodeState'].includes(key)) || fields.some(key => !Object.hasOwn(input, key))) invalid('root', 'unknown or missing field');
+  if (Object.keys(input).some(key => !fields.includes(key) && !['configHash', 'baseHead', 'baseCodeState', 'milestones', 'verifyFailures', 'bootstrap'].includes(key)) || fields.some(key => !Object.hasOwn(input, key))) invalid('root', 'unknown or missing field');
+  if (Object.hasOwn(input, 'milestones')) {
+    plainObject(input.milestones, 'milestones');
+    if (Object.entries(input.milestones).some(([id, status]) => !/^M[1-9][0-9]*$/.test(id) || status !== 'done')) invalid('milestones', 'expected M<n>: done');
+  }
+  if (Object.hasOwn(input, 'verifyFailures') && (!Number.isSafeInteger(input.verifyFailures) || input.verifyFailures < 0)) invalid('verifyFailures', 'expected a non-negative integer');
+  if (Object.hasOwn(input, 'bootstrap') && input.bootstrap !== true) invalid('bootstrap', 'expected true');
   if (Object.hasOwn(input, 'baseCodeState') && (typeof input.baseCodeState !== 'string' || !/^fp:[0-9a-f]{64}$/.test(input.baseCodeState))) invalid('baseCodeState', 'expected fp:<hex>');
   if (Object.hasOwn(input, 'configHash') && (typeof input.configHash !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(input.configHash))) invalid('configHash', 'expected sha256:<hex>');
   if (Object.hasOwn(input, 'baseHead') && (typeof input.baseHead !== 'string' || !/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(input.baseHead))) invalid('baseHead', 'expected a commit SHA');

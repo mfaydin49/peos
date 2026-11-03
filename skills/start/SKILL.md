@@ -5,7 +5,8 @@ argument-hint: "<request> [--tier trivial|small|standard|large] [--type app|feat
 disable-model-invocation: true
 ---
 
-Read ${CLAUDE_PLUGIN_ROOT}/skills/orchestrator/SKILL.md and follow it for a new run.
+Read ${CLAUDE_PLUGIN_ROOT}/skills/orchestrator/SKILL.md and follow it for a new run:
+sections 0, 1 and 2.
 
 Request:
 

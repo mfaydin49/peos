@@ -65,3 +65,15 @@ export function validateEvalReport(input) {
 export function evalKey(report) {
   return report.focus ? `${report.evaluator}-${report.focus}` : report.evaluator;
 }
+// What the orchestrator needs from a report without reading it: the blocking findings in
+// short form, counts, and a signature to tell whether two rounds block on the same things.
+const blocking = report => report.findings.filter(finding => ['critical', 'high'].includes(finding.severity));
+const unmet = report => report.criteria.filter(criterion => criterion.status === 'not_met');
+export function digest(report) {
+  return {
+    blocking: blocking(report).map(({ id, severity, file, problem, fix }) => ({ id, severity, ...(file ? { file } : {}), problem, fix })),
+    unmetCriteria: unmet(report).map(criterion => criterion.id),
+    nonBlocking: report.findings.length - blocking(report).length
+  };
+}
+export const signature = report => JSON.stringify([...blocking(report).map(finding => `${finding.file ?? ''}|${finding.problem}`), ...unmet(report).map(criterion => criterion.id)].sort());

@@ -110,7 +110,11 @@ test('revision reopens the gate and later gates and discards their evaluations',
   await approveArtifact(t, project, name, 'spec', 'spec');
   await approveArtifact(t, project, name, 'plan', 'plan');
   const { report } = run(project, 'revise', ['--run', name, '--gate', 'spec']);
-  assert.deepEqual(report.gates, { spec: { status: 'revision_requested' }, plan: { status: 'pending' } });
+  // The revision keeps the artifact it was requested on, so the producer knows it has work to do.
+  assert.deepEqual(Object.keys(report.gates.spec).sort(), ['artifactHash', 'at', 'status']);
+  assert.equal(report.gates.spec.status, 'revision_requested');
+  assert.equal(report.gates.spec.artifactHash, `sha256:${sha('spec')}`);
+  assert.deepEqual(report.gates.plan, { status: 'pending' });
   assert.equal(report.stage, 'spec');
   assert.deepEqual(run(project, 'status', ['--run', name]).report.state.evals, {});
 });

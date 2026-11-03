@@ -9,10 +9,11 @@ Projects retain their architecture, technology, design system, domain policy,
 check commands, budgets, approvals, task records and decisions. The toolkit supplies
 routing, four focused stage skills, rule documents, project and run templates, schemas,
 and four local scripts. It is also a Claude Code plugin preview (below) with entry
-skills, nine agents (project profile, investigation, spec, plan, implementation and four evaluators) and hooks that
+skills, ten agents (project profile, investigation, spec, architecture, plan, implementation and four evaluators) and hooks that
 protect run state and human gate decisions. The direction is specified in the [v2 design](docs/design/peos-v2-plugin.md);
-increments 1–5 are implemented: request → spec → plan → implementation →
-checks → independent code and security evaluation → release stage, with extra
+increments 1–5 and 7a are implemented: request → spec → (architecture) → plan → implementation →
+checks → independent code and security evaluation → release stage, for every tier from a
+one-line fix to a new application built milestone by milestone, with extra
 behavior-preservation rules for refactor runs and deterministic quality guardrails
 (floor guard, shortcut markers, code map). `/peos:init` (also run automatically by
 `/peos:start`) writes the check configuration from the project's manifests, a project
@@ -39,7 +40,8 @@ increment 6; see the [v2 design](docs/design/peos-v2-plugin.md).
 
 The project needs a Git repository with at least one commit, and a root test command
 PEOS can detect (a `test` script in `package.json`, pytest, `go test`, `cargo test`,
-`swift test` or Gradle). Otherwise install stops and tells you what is missing.
+`swift test` or Gradle). Otherwise install stops and tells you what is missing; an
+empty repository is the exception (see [Start a new application](#start-a-new-application)).
 
 Install once per project:
 
@@ -93,7 +95,31 @@ request:
 | `trivial` | One file, a few lines | None |
 | `small` | One concern, about 5 files, no user-level choice | None |
 | `standard` | A real user-level choice, or a change to a trust boundary | One `/peos:approve` after the spec and plan both pass evaluation |
-| `large` | New application or several open questions | Arrives in increment 7 |
+| `large` | New application, several components or open questions | `/peos:approve spec`, `/peos:approve architecture` and `/peos:approve plan`, each after its evaluation passes |
+
+A `large` run adds an architecture (stack, components, data, every new dependency) and
+splits the plan into milestones; each milestone is implemented, checked and evaluated
+before the next starts. Approving the architecture is your consent to install the
+dependencies it lists, and only those.
+
+The run's control flow is in `peos-run next` ([design](docs/design/peos-next.md)): it
+decides the next agent, check or gate from the recorded state, so the orchestrator only
+carries it out and a resumed run continues exactly where it stopped.
+
+### Start a new application
+
+PEOS also starts from an empty repository. It needs one commit:
+
+```sh
+mkdir habits && cd habits && git init && git commit --allow-empty -m "Initial commit"
+node /path/to/personal-engineering-os/scripts/install.mjs --project .
+```
+
+Then `/peos:start A habit tracker for the web with daily reminders.` The run is an `app`
+and always `large`. Its first milestone is a walking skeleton that creates the manifests
+and a root test command; PEOS derives the checks from them, never writes them itself,
+and then describes the new project for later agents. Run install again after that
+milestone to connect Codex and Copilot.
 
 The agent asks a question only when the choice is yours. Implementation, checks and
 evaluation then run on their own. A run ends at the release stage with a summary in

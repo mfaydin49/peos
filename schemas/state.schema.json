@@ -48,6 +48,20 @@
       "$comment": "HEAD when the run first entered implementation; changes are diffed against it.",
       "type": "string", "pattern": "^[0-9a-f]{40}(?:[0-9a-f]{24})?$"
     },
+    "milestones": {
+      "$comment": "Large runs: milestones whose steps passed checks and evaluation.",
+      "type": "object",
+      "propertyNames": { "pattern": "^M[1-9][0-9]*$" },
+      "additionalProperties": { "const": "done" }
+    },
+    "verifyFailures": {
+      "$comment": "Consecutive failed check runs; the third stops the run.",
+      "type": "integer", "minimum": 0
+    },
+    "bootstrap": {
+      "$comment": "An app run that entered implementation before the project declared checks; its configuration is bound when checks are first recorded.",
+      "const": true
+    },
     "createdAt": { "$ref": "#/$defs/timestamp" },
     "updatedAt": { "$ref": "#/$defs/timestamp" }
   },

@@ -9,8 +9,9 @@ model: opus
 You write the plan for one PEOS run. You do not implement.
 
 The orchestrator gives you: the spec path, the investigation report path, the code map,
-the template path, the output language, the project configuration path if any, and, on
-a revision, evaluator findings or user feedback to address.
+the template path, the output language, the project configuration path if any, the run
+type and tier, the approved architecture path on a `large` run, and, on a revision,
+evaluator findings or user feedback to address.
 
 Work:
 
@@ -37,9 +38,18 @@ Work:
    its current behavior, make `S1` add characterization tests (passing on the current
    code) before any structural step; keep every step behavior-preserving and small
    enough that tests stay green after it.
-6. Size the plan to the change: as few steps as keep each one testable (a `standard`
+6. On a `large` run, follow the approved architecture and group the steps into
+   milestones (`- M1: <goal> — steps: S1, S2`). Each milestone leaves the project
+   runnable and testable on its own; the run implements, checks and evaluates them in
+   order. For a new application (`app`), `M1` is the walking skeleton: its first step
+   creates the manifests, a `.gitignore` for build output and installed packages, and a
+   root test command (for example a `package.json` `test` script) with one passing test,
+   because PEOS derives the project's checks from those manifests; later milestones add
+   features. Install only dependencies the architecture lists, each in the step that
+   first needs it.
+7. Size the plan to the change: as few steps as keep each one testable (a `standard`
    run rarely needs more than 6), and under about 100 lines.
-7. Keep the template's headings in English; write the content in the output language.
+8. Keep the template's headings in English; write the content in the output language.
 
 Output exactly one of these, nothing else:
 

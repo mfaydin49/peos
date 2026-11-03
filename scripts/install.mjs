@@ -43,11 +43,17 @@ await main(async () => {
   const project = await projectDirectory(options.project);
   if (project === toolkit) fail('INSTALL', 'Choose a consuming project, not the toolkit itself.');
   const run = ['--project', project];
-  script('peos-run.mjs', ['setup', ...run]);
-  script('setup-codex.mjs', run);
-  await excludeLinks(project);
+  // An empty project has no checks until an app run's walking skeleton declares them; the
+  // instruction workflow for Codex and Copilot needs them, so it is connected on a later install.
+  const deferred = script('peos-run.mjs', ['setup', ...run]).config === 'deferred';
+  if (!deferred) {
+    script('setup-codex.mjs', run);
+    await excludeLinks(project);
+  }
   // Run again: setup-codex may have just created AGENTS.md, which CLAUDE.md imports.
   const { checks, instructions } = script('peos-run.mjs', ['setup', ...run]);
-  return { report: { status: 'PASS', project, checks, instructions, claude: installClaudePlugin(project) } };
-}, report => [`PEOS installed in ${report.project}.`, `Checks: ${report.checks.join('; ')}`, `Claude Code: ${report.claude}`, 'Codex and Copilot: AGENTS.md and .agents/skills connected',
+  return { report: { status: 'PASS', project, checks, instructions, claude: installClaudePlugin(project),
+    instructionWorkflow: deferred ? 'skipped: empty project; install again after the app\'s first milestone' : 'connected' } };
+}, report => [`PEOS installed in ${report.project}.`, `Checks: ${report.checks.length ? report.checks.join('; ') : 'none yet (empty project: start an app with /peos:start; its first milestone declares them)'}`, `Claude Code: ${report.claude}`,
+  `Codex and Copilot: ${report.instructionWorkflow === 'connected' ? 'AGENTS.md and .agents/skills connected' : report.instructionWorkflow}`,
   'Review the checks, then open a new session in the project. Nothing was committed.'].join('\n'));

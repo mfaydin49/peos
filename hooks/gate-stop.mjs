@@ -6,7 +6,9 @@ import { readInput, projectRoot, profile, activeRuns, emit, transcriptEntries, s
 import { artifactHash, gateArtifacts, gateEvalKeys } from '../scripts/lib/run-state.mjs';
 
 const recentMs = 60 * 60 * 1000;
-const producers = { spec: 'peos:spec-writer', plan: 'peos:planner' };
+const producers = { spec: 'peos:spec-writer', architecture: 'peos:architect', plan: 'peos:planner' };
+// The architecture is judged by the plan evaluator with focus architecture.
+const evaluators = { spec: 'peos:eval-spec', architecture: 'peos:eval-plan', plan: 'peos:eval-plan' };
 // Hosts may run agents in the background: the turn ends while the agent works and its
 // result arrives later as a hand-back. An evaluator launched after the artifact was
 // written, or a producer still rewriting it, is pending until handed back, so stopping
@@ -49,13 +51,15 @@ try {
       const hash = await artifactHash(active.directory, gate);
       const written = hash ? (await stat(artifact)).mtimeMs : 0;
       const recent = hash && Date.now() - written < recentMs;
-      const evaluated = active.state.evals[gateEvalKeys[gate]]?.subject === hash;
+      // After /peos:revise the artifact waits for the user's feedback and its producer, not an evaluator.
+      const revising = active.state.gates[gate].status === 'revision_requested' && active.state.gates[gate].artifactHash === hash;
+      const evaluated = revising || active.state.evals[gateEvalKeys[gate]]?.subject === hash;
       // Block at most once per artifact version, even if the host omits stop_hook_active.
       const marker = resolve(active.directory, '.stop-block');
       const already = await readFile(marker, 'utf8').catch(() => '') === hash;
-      if (recent && !evaluated && !already && !agentPending(entries, `peos:eval-${gate}`, written - 2000) && !agentPending(entries, producers[gate], 0)) {
+      if (recent && !evaluated && !already && !agentPending(entries, evaluators[gate], written - 2000) && !agentPending(entries, producers[gate], 0)) {
         await writeFile(marker, hash);
-        emit({ decision: 'block', reason: `PEOS run ${active.state.run}: ${gateArtifacts[gate]} was written but has no evaluation for its current content. Run the ${gateEvalKeys[gate]} evaluator and record it with peos-run record-eval, or tell the user why it cannot be evaluated.` });
+        emit({ decision: 'block', reason: `PEOS run ${active.state.run}: ${gateArtifacts[gate]} was written but has no evaluation for its current content. Call peos-run next and spawn the evaluator it names, or tell the user why it cannot be evaluated.` });
       }
     }
   }

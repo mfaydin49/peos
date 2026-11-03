@@ -14,5 +14,5 @@ equally likely.
 
 1. Run `node "${CLAUDE_PLUGIN_ROOT}/scripts/peos-run.mjs" revise --project "${CLAUDE_PROJECT_DIR}" --run <run> --gate <gate> --json`.
    This reopens the gate and every later gate and restarts their evaluation rounds.
-2. Read ${CLAUDE_PLUGIN_ROOT}/skills/orchestrator/SKILL.md and
-   ${CLAUDE_PLUGIN_ROOT}/skills/orchestrator/standard.md and redo that stage, giving the producer the current artifact and the user's feedback.
+2. Read ${CLAUDE_PLUGIN_ROOT}/skills/orchestrator/SKILL.md and continue with its section 2
+   (Loop): `next` spawns the producer, to which you give the user's feedback above.

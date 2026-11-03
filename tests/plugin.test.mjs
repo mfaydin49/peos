@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { access, readdir, readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { toolkit } from './helpers.mjs';
-import { runActions } from '../scripts/lib/run-actions.mjs';
+import { runActions, runFlags } from '../scripts/lib/run-actions.mjs';
 
 const json = async path => JSON.parse(await readFile(resolve(toolkit, path), 'utf8'));
 // Minimal frontmatter reader: the plugin files use flat "key: value" lines only.
@@ -20,7 +20,7 @@ async function document(path) {
 const list = value => value.split(',').map(item => item.trim()).filter(Boolean);
 const agentFiles = (await readdir(resolve(toolkit, 'agents'))).filter(name => name.endsWith('.md'));
 const skillNames = (await readdir(resolve(toolkit, 'skills'), { withFileTypes: true })).filter(entry => entry.isDirectory()).map(entry => entry.name);
-const pluginFiles = [...agentFiles.map(name => resolve(toolkit, 'agents', name)), ...skillNames.map(name => resolve(toolkit, 'skills', name, 'SKILL.md')), resolve(toolkit, 'skills/orchestrator/standard.md'), resolve(toolkit, 'skills/orchestrator/resume.md')];
+const pluginFiles = [...agentFiles.map(name => resolve(toolkit, 'agents', name)), ...skillNames.map(name => resolve(toolkit, 'skills', name, 'SKILL.md'))];
 
 test('plugin and marketplace manifests agree with the package', async () => {
   const plugin = await json('.claude-plugin/plugin.json');
@@ -32,7 +32,7 @@ test('plugin and marketplace manifests agree with the package', async () => {
 });
 
 test('agents are named after their file, cannot delegate, and only the implementer edits code or runs commands', async () => {
-  assert.deepEqual(agentFiles.sort(), ['eval-code.md', 'eval-plan.md', 'eval-security.md', 'eval-spec.md', 'implementer.md', 'investigator.md', 'planner.md', 'profiler.md', 'spec-writer.md']);
+  assert.deepEqual(agentFiles.sort(), ['architect.md', 'eval-code.md', 'eval-plan.md', 'eval-security.md', 'eval-spec.md', 'implementer.md', 'investigator.md', 'planner.md', 'profiler.md', 'spec-writer.md']);
   for (const name of agentFiles) {
     const { fields } = await document(resolve(toolkit, 'agents', name));
     assert.equal(fields.name, name.replace(/\.md$/, ''));
@@ -73,7 +73,7 @@ test('plugin paths, Markdown links and peos-run commands referenced by plugin fi
     for (const [, action, rest] of source.matchAll(/peos-run(?:\.mjs")? ([a-z][a-z-]+)([^`\n]*)/g)) {
       assert.ok(Object.hasOwn(runActions, action), `${path}: unknown peos-run action ${action}`);
       for (const [, option] of rest.matchAll(/--([a-z][a-z-]*)/g)) {
-        assert.ok([...runActions[action], 'json'].includes(option), `${path}: ${action} has no --${option}`);
+        assert.ok([...runActions[action], ...(runFlags[action] ?? []), 'json'].includes(option), `${path}: ${action} has no --${option}`);
       }
       commands++;
     }

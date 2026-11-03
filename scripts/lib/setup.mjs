@@ -122,11 +122,26 @@ async function linkInstructions(project) {
   catch (error) { if (error.code === 'EEXIST') return 'present'; throw error; }
 }
 
+// Files a repository holds before any product code exists.
+const scaffolding = /^(?:\.[^/]+(?:\/.*)?|(?:README|LICENSE|CHANGELOG|CONTRIBUTING)[^/]*|AGENTS\.md|CLAUDE\.md|docs\/.*)$/i;
+export function emptyProject(project) {
+  const files = git(project, ['ls-files', '--cached', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean);
+  return files.every(path => scaffolding.test(path));
+}
+
 export async function setupProject(project) {
-  const head = headCommit(project);
+  let head;
+  try { head = headCommit(project); }
+  catch (error) { if (error instanceof ToolkitError && error.code === 'NO_HEAD') fail('SETUP', 'The repository has no commit yet. Evidence is bound to a commit: create one first, for example with git commit --allow-empty -m "Initial commit".'); throw error; }
   let config = 'existing';
   if (await text(project, configPath) === null) {
     const checks = await detectChecks(project);
+    // A new application declares its checks in its walking skeleton (design peos-next.md §6).
+    if (!checks.length && emptyProject(project)) {
+      const instructions = Object.fromEntries(await Promise.all(instructionFiles.map(async path => [path, await exists(project, path) ? 'present' : 'missing'])));
+      return { config: 'deferred', configPath: resolve(project, configPath), addedChecks: [], suggestedChecks: [], checks: [],
+        instructions, profile: { path: resolve(project, profilePath), head, ...await profileStatus(project) } };
+    }
     if (!checks.length) fail('SETUP', `No test command could be detected from the root manifests (workspace packages and nested projects are not searched). Add a root test script or write ${configPath} by hand (see the toolkit's templates/engineering.config.json).`);
     const created = validateConfig({
       schemaVersion: 1, projectName: await projectName(project), outputLanguage: 'tr',

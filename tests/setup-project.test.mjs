@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { chmod, mkdir, readFile, realpath as realpathOf, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { basename, dirname, resolve } from 'node:path';
-import { config, git, jsonCli, repository, saveConfig, toolkit } from './helpers.mjs';
+import { config, fixture, git, jsonCli, repository, saveConfig, toolkit } from './helpers.mjs';
 import { detectChecks } from '../scripts/lib/setup.mjs';
 import { sessionCalls, summarizeUsage, totals } from '../scripts/lib/usage.mjs';
 
@@ -224,4 +224,20 @@ test('install stops before changing a project it cannot set up', async t => {
   assert.equal(jsonCli('install.mjs', ['--project', project]).report.error.code, 'SETUP');
   await assert.rejects(readFile(resolve(project, 'AGENTS.md')));
   assert.equal(jsonCli('install.mjs', ['--project', toolkit]).report.error.code, 'INSTALL');
+});
+
+test('an empty repository defers its checks to a new application, and needs one commit', async t => {
+  const project = await fixture(t, null);
+  git(project, 'init', '-b', 'main');
+  assert.match(jsonCli('install.mjs', ['--project', project]).report.error.message, /git commit --allow-empty/);
+  await writeFile(resolve(project, 'README.md'), '# Habits\n');
+  await mkdir(resolve(project, 'docs'));
+  await writeFile(resolve(project, 'docs/idea.md'), 'An app for habits.');
+  commit(project, 'initial');
+  const install = jsonCli('install.mjs', ['--project', project], { env: { ...process.env, PATH: `/usr/bin:${dirname(process.execPath)}` } }).report;
+  assert.deepEqual([install.status, install.checks, install.instructionWorkflow], ['PASS', [], 'skipped: empty project; install again after the app\'s first milestone']);
+  await assert.rejects(readFile(resolve(project, '.project-os/engineering.config.json')), 'nothing is invented');
+  assert.equal(run(project, 'setup').config, 'deferred');
+  await writeFile(resolve(project, 'main.py'), 'print(1)\n');
+  assert.equal(run(project, 'setup').error.code, 'SETUP', 'product code without a test command is not empty');
 });

@@ -219,7 +219,7 @@ loads only the rules it needs.
 | `profiler` | project → `.project-os/project-profile.md` (facts agents need first); writes `AGENTS.md` (and a `CLAUDE.md` import) when missing | Read, Grep, Glob, Write | mid | only those files (guarded) |
 | `investigator` | request → affected code, current behavior, root cause (fix), size and trust-boundary signals for classification | Read, Grep, Glob | mid | no |
 | `spec-writer` | idea/request → spec; records reversible defaults as decisions, asks only user-level choices in one round | Read, Grep, Glob, Write | strongest | only `<run>/spec.md` (guarded) |
-| `architect` | platform, stack, data model, components, ADR proposals | Read, Grep, Glob, docs lookup | strongest | no |
+| `architect` | platform, stack, data model, components, every new dependency (approving it is consent to install them) | Read, Grep, Glob, Write | strongest | only `<run>/architecture.md` (guarded) |
 | `planner` | spec → ordered steps with files, AC coverage, tests | Read, Grep, Glob, Write | strongest | only `<run>/plan.md` (guarded) |
 | `implementer` | plan steps in order (one agent per batch, not per step): code + tests, targeted verify | Read, Grep, Glob, Edit, Write, Bash | mid | **yes** (project code only) |
 | `eval-spec` | spec quality | Read, Grep, Glob, Write | mid | only its `<run>/pending-eval-<name>.json` (guarded) |
@@ -574,8 +574,9 @@ Each increment is independently usable and verified before the next.
 | 5j | Cache cost: `peos-run begin`, `finish` and `brief` replace runs of bookkeeping calls and full state output in the main session; `map --run` no longer returns the map; the orchestrator skill loads `standard.md` and `resume.md` only when needed; evaluators get the report shape in `rules/evaluation.md` instead of reading the schema; `eval-code` runs on Sonnet for trivial and small runs | **done 2026-11-01** |
 | 5k | One-time project install: `scripts/install.mjs` runs project setup, connects Codex and Copilot through `AGENTS.md` and `.agents/skills`, keeps the links out of commits with `.git/info/exclude`, and enables the Claude Code plugin at local scope, so no launch flag is needed. Only Claude Code enforces gates | **done 2026-11-01** |
 | 5l | Field-trial 5 (remove a menu list, `small`, 3 min 53 s, about 103 Copilot-rate credits, no repeated round): the final report reads `brief`; `eval-code` lists what it could not observe, such as an unrendered interface | **done 2026-11-01** |
+| 7a | Control flow in `peos-run next` ([peos-next.md](peos-next.md)): the orchestrator skill shrinks to setup, intake and a loop (`standard.md`, `resume.md` removed); rejected reports kept aside once, revision and retry state, plateau across sessions (`<key>.prev.json`), `verifyFailures`. Large tier: `architect`, `eval-plan` focus `architecture`, three separate gates, milestones with scoped code evaluations. New applications from an empty repository: deferred setup, `bootstrap` binding of the checks the walking skeleton declares, profiler afterwards | **done 2026-11-03**: unit tests for every tier, failure path and the empty-repository app flow; not yet exercised by a model |
 | 6 | Release: `release-guard`, release report, CI/permission templates in `/peos:init` | deploy command denied without READY; template reviewed |
-| 7 | Large tier: idea, architect, milestones, `eval-performance`, `web`/`ios`/`android` profiles | a small app built end-to-end on web, iOS and Android |
+| 7 | Rest of the large tier: `eval-performance`, `web`/`ios`/`android` profiles | a small app built end-to-end on web, iOS and Android |
 | 8 | Reference evaluation: 3 reference tasks, usage and defect-catch measurements | report of cost per tier and evaluator usefulness; tuning decisions recorded |
 
 ## 18. Host assumptions

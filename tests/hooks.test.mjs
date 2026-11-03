@@ -101,12 +101,15 @@ test('state-guard denies writes to run state, evidence and decisions, and allows
   assert.equal(agentWrite('peos:spec-writer', resolve(directory, 'spec.md')), null, 'its own artifact');
   assert.ok(denied(agentWrite('peos:spec-writer', resolve(directory, 'plan.md'))));
   assert.ok(denied(agentWrite('peos:spec-writer', resolve(directory, 'state.json'))));
+  assert.equal(agentWrite('peos:architect', resolve(directory, 'architecture.md')), null, 'the architect writes its own artifact');
+  assert.ok(denied(agentWrite('peos:architect', resolve(directory, 'plan.md'))));
   assert.equal(agentWrite('peos:eval-code', resolve(directory, 'pending-eval-code.json')), null, 'its report');
   assert.ok(denied(agentWrite('peos:eval-code', resolve(directory, 'spec.md'))));
   assert.ok(denied(agentWrite('peos:eval-code', resolve(directory, 'evals/code-all.json'))));
   assert.ok(denied(agentWrite('peos:investigator', resolve(directory, 'pending-eval-x.json'))));
   assert.ok(denied(agentWrite('peos:eval-spec', resolve(directory, 'pending-eval-code.json'))), 'another evaluator\'s report');
   assert.equal(agentWrite('peos:eval-code', resolve(directory, 'pending-eval-code-quality.json')), null, 'a focused report');
+  assert.equal(agentWrite('peos:eval-plan', resolve(directory, 'pending-eval-plan-architecture.json')), null, 'the architecture report');
   assert.ok(denied(agentWrite('peos:spec-writer', resolve(project, '.project-os/runs/2026-01-01-invented/spec.md'))), 'an invented run');
   assert.ok(denied(hook('state-guard', project, { agent_type: 'peos:eval-code', tool_name: 'Edit', tool_input: { file_path: resolve(directory, 'pending-eval-code.json') } })));
   assert.equal(hook('state-guard', project, { agent_type: 'Explore', tool_name: 'Bash', tool_input: { command: 'ls' } }), null);
@@ -160,6 +163,39 @@ test('gate-stop waits for an evaluator running in the background', async t => {
   await writeFile(resolve(directory, 'spec.md'), 'draft v3');
   await writeFile(transcript_path, [own, launch('peos:eval-spec'), foreground('peos:eval-spec')].join('\n'));
   assert.equal(hook('gate-stop', project, { transcript_path }).decision, 'block', 'a foreground evaluator has finished');
+});
+
+test('gate-stop knows the architecture is written by the architect and judged by eval-plan', async t => {
+  const project = await repository(t);
+  await saveConfig(project, config());
+  const { run: name, directory } = run(project, 'init', ['--name', 'reports', '--type', 'feature', '--tier', 'large']);
+  await evaluatedSpec(project, name, directory);
+  run(project, 'grant', ['--action', 'approve', '--target', 'spec', '--run', name]);
+  assert.equal(run(project, 'approve', ['--run', name, '--gate', 'spec']).status, 'PASS');
+  run(project, 'advance', ['--run', name, '--to', 'architecture']);
+  await writeFile(resolve(directory, 'architecture.md'), 'draft');
+  const at = new Date(Date.now() + 1000).toISOString();
+  const background = agent => [JSON.stringify({ type: 'assistant', timestamp: at, message: { content: [{ type: 'tool_use', id: `call-${agent}`, name: 'Agent', input: { subagent_type: agent, prompt: name } }] } }),
+    JSON.stringify({ type: 'user', timestamp: at, message: { content: [{ type: 'tool_result', tool_use_id: `call-${agent}`, content: [{ type: 'text', text: `Async agent launched successfully.\nagentId: id-${agent.replace(':', '-')} (internal ID)` }] }] } })];
+  const transcript_path = resolve(project, 'transcript.jsonl');
+  await writeFile(transcript_path, [ranPeos(`next --run ${name}`), ...background('peos:eval-plan')].join('\n'));
+  assert.equal(hook('gate-stop', project, { transcript_path }), null, 'the architecture evaluator is still running');
+  await writeFile(transcript_path, [ranPeos(`next --run ${name}`), ...background('peos:architect')].join('\n'));
+  assert.equal(hook('gate-stop', project, { transcript_path }), null, 'the architect is still writing it');
+  await writeFile(transcript_path, ranPeos(`next --run ${name}`));
+  assert.match(hook('gate-stop', project, { transcript_path }).reason, /peos-run next/);
+});
+
+test('gate-stop does not ask for an evaluation while a revision waits for its producer', async t => {
+  const { project, name, directory } = await standardRun(t);
+  await evaluatedSpec(project, name, directory, 'draft');
+  run(project, 'grant', ['--action', 'revise', '--target', 'spec', '--run', name]);
+  assert.equal(run(project, 'revise', ['--run', name, '--gate', 'spec']).status, 'PASS');
+  const transcript_path = resolve(project, 'transcript.jsonl');
+  await writeFile(transcript_path, ranPeos(`next --run ${name}`));
+  assert.equal(hook('gate-stop', project, { transcript_path }), null, 'the user\'s feedback is awaited');
+  await writeFile(resolve(directory, 'spec.md'), 'revised');
+  assert.equal(hook('gate-stop', project, { transcript_path }).decision, 'block', 'the revised spec needs its evaluation');
 });
 
 test('gate-stop picks the run the session works on, not a run whose name contains it', async t => {

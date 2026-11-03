@@ -3,12 +3,13 @@ import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { main, parseArgs, projectDirectory, fail, ToolkitError } from './lib/cli.mjs';
-import { validateEvalReport, evalKey } from './lib/eval-report.mjs';
-import { runActions } from './lib/run-actions.mjs';
+import { validateEvalReport, evalKey, digest, signature } from './lib/eval-report.mjs';
+import { runActions, runFlags } from './lib/run-actions.mjs';
+import { next } from './lib/next.mjs';
 import { consumeGrant, insideClaudeCode, writeGrant } from './lib/grants.mjs';
 import { codeChanges } from './lib/changes.mjs';
 import { codeMap } from './lib/map.mjs';
-import { setupProject } from './lib/setup.mjs';
+import { emptyProject, setupProject } from './lib/setup.mjs';
 import { summarizeUsage, usageFile } from './lib/usage.mjs';
 import { requireRoot, headCommit } from './lib/git.mjs';
 import {
@@ -104,7 +105,7 @@ async function init(project, options) {
   try { await mkdir(directory); }
   catch (error) { if (error.code === 'EEXIST') fail('RUN_EXISTS', 'A run with this name already exists today.'); throw error; }
   // Evidence and state are working files; committed artifacts are the Markdown documents.
-  await writeFile(resolve(directory, '.gitignore'), 'state.json\nstate.lock\nchecks.json\nbaseline-checks.json\nchanges.diff\nmap.md\nevals/\npending-eval.json\npending-eval-*.json\n.stop-block\nusage.json\n*.tmp-*\n');
+  await writeFile(resolve(directory, '.gitignore'), 'state.json\nstate.lock\nchecks.json\nbaseline-checks.json\nchanges.diff\nmap.md\nevals/\npending-eval.json\npending-eval-*.json\nrejected-eval-*.json\n.stop-block\nusage.json\n*.tmp-*\n');
   const now = new Date().toISOString();
   const state = { schemaVersion: 1, run, type, tier, stage: 'intake',
     gates: Object.fromEntries(tierGates[tier].map(gate => [gate, { status: 'pending' }])),
@@ -207,18 +208,6 @@ async function specSize(directory, state) {
   const criteria = (source.match(/^\s*-\s*AC-\d+\s*:/gm) ?? []).length;
   return { criteria, limit, over: criteria > limit };
 }
-// What the orchestrator needs from a report without reading it: the blocking findings in
-// short form, counts, and whether the blocking findings repeat the previous round's.
-const blocking = report => report.findings.filter(finding => ['critical', 'high'].includes(finding.severity));
-const unmet = report => report.criteria.filter(criterion => criterion.status === 'not_met');
-function digest(report) {
-  return {
-    blocking: blocking(report).map(({ id, severity, file, problem, fix }) => ({ id, severity, ...(file ? { file } : {}), problem, fix })),
-    unmetCriteria: unmet(report).map(criterion => criterion.id),
-    nonBlocking: report.findings.length - blocking(report).length
-  };
-}
-const signature = report => JSON.stringify([...blocking(report).map(finding => `${finding.file ?? ''}|${finding.problem}`), ...unmet(report).map(criterion => criterion.id)].sort());
 async function recordEval(project, options) {
   const directory = await runDirectory(project, options.run);
   if (typeof options.report !== 'string') fail('INVOCATION', '--report requires a JSON file path or - for stdin.');
@@ -252,6 +241,10 @@ async function recordEval(project, options) {
     let earlier = null;
     try { earlier = round > 1 ? JSON.parse(await readRunFile(evals, `${key}.json`) ?? 'null') : null; } catch { earlier = null; }
     await writeJsonAtomic(resolve(evals, `${key}.json`), report);
+    // The previous round's report stays beside it, so a plateau is visible in a later session.
+    if (earlier && report.verdict !== 'PASS') await writeJsonAtomic(resolve(evals, `${key}.prev.json`), earlier);
+    else await rm(resolve(evals, `${key}.prev.json`), { force: true });
+    await rm(resolve(evals, `${key}.reset.json`), { force: true });
     state.evals[key] = { verdict: report.verdict, round, subject: report.subject };
     // A plan evaluated against an older spec no longer counts.
     if (key === 'spec' && previous?.subject !== report.subject) delete state.evals.plan;
@@ -289,6 +282,14 @@ async function approve(project, options) {
     if (assessment.gates[gate].fresh) return { run: state.run, gate, gates: state.gates };
     // A new approval changes what later artifacts were built on, so later gates must be re-evaluated and re-approved.
     reopenLater(state, gate);
+    // A newly approved plan is implemented from its first step: progress, code evaluations
+    // and the summary of an earlier plan no longer describe it.
+    if (decided.includes('plan') && (Object.keys(state.steps).length || state.milestones)) {
+      state.steps = {};
+      delete state.milestones;
+      for (const key of Object.keys(state.evals).filter(key => !gateForEval[key])) delete state.evals[key];
+      await rm(resolve(directory, 'summary.md'), { force: true });
+    }
     const at = new Date().toISOString();
     for (const name of decided) state.gates[name] = { status: 'approved', by: 'human', artifactHash: assessment.artifacts[name], at };
     await writeState(directory, state);
@@ -310,7 +311,9 @@ async function revise(project, options) {
     const gate = choice(options.gate, Object.keys(state.gates), 'gate');
     await consumeGrant(project, 'revise', gate, state.run);
     reopenLater(state, gate);
-    state.gates[gate] = { status: 'revision_requested' };
+    // The artifact the revision was requested on: until it changes, the producer has work to do.
+    const hash = await artifactHash(directory, gate);
+    state.gates[gate] = { status: 'revision_requested', ...(hash ? { artifactHash: hash } : {}), at: new Date().toISOString() };
     delete state.evals[gateEvalKeys[gate]];
     state.stage = gate;
     await writeState(directory, state);
@@ -330,7 +333,11 @@ async function resetEval(project, options) {
     let last = null;
     try { last = JSON.parse(await readRunFile(evals, `${options.key}.json`) ?? 'null'); } catch { last = null; }
     delete state.evals[options.key];
+    // Kept aside so the next round starts from its findings, not from a fresh evaluation
+    // of unchanged work (design peos-next.md §5).
+    if (last) await writeJsonAtomic(resolve(evals, `${options.key}.reset.json`), last);
     await rm(resolve(evals, `${options.key}.json`), { force: true });
+    await rm(resolve(evals, `${options.key}.prev.json`), { force: true });
     await writeState(directory, state);
     return { run: state.run, key: options.key, evals: state.evals, ...(last?.findings ? { last: digest(last) } : {}) };
   });
@@ -394,16 +401,28 @@ async function advance(project, options) {
       const assessment = await assess(directory, state, codeState);
       requireGates(assessment);
       // Later stages need the binding made on entering implement, so it cannot be skipped.
+      if (to !== 'implement' && !Object.hasOwn(state, 'baseHead')) fail('TRANSITION', 'Enter the implement stage first.');
+      // A new application has no checks until its walking skeleton declares them; they are
+      // bound when its first checks are recorded (design peos-next.md §6).
+      if (to !== 'implement' && state.bootstrap && !Object.hasOwn(state, 'configHash')) {
+        if (to !== 'verify') fail('TRANSITION', 'An app run binds its configuration when it first records checks.');
+        const hash = await configHash(project);
+        if (hash === null) fail('CONFIG_MISSING', 'The walking skeleton has no configuration yet; run setup after it declares a root test command.');
+        state.configHash = hash;
+      }
       if (to !== 'implement' && !Object.hasOwn(state, 'configHash')) fail('TRANSITION', 'Enter the implement stage first.');
       if (['release', 'done'].includes(to)) requireCodeEvidence(state, assessment, { releasePhase: to === 'done' });
     }
     // On first entry into implement, bind the run to the configured checks and to the
     // commit the change starts from (design §12 residual risks).
-    if (to === 'implement' && !Object.hasOwn(state, 'configHash')) {
+    if (to === 'implement' && !Object.hasOwn(state, 'baseHead')) {
       const hash = await configHash(project);
-      if (hash === null) fail('CONFIG_MISSING', 'Implementation needs .project-os/engineering.config.json with the project\'s checks; ask the user to create it.');
+      // Only a new application in an empty repository starts without checks; anywhere else
+      // the user first sees the configuration setup derives (orchestrator section 0).
+      if (hash === null && !(state.type === 'app' && emptyProject(project))) fail('CONFIG_MISSING', 'Implementation needs .project-os/engineering.config.json with the project\'s checks; run setup and review them.');
       requireRoot(project);
-      state.configHash = hash;
+      if (hash === null) state.bootstrap = true;
+      else state.configHash = hash;
       state.baseHead = headCommit(project);
       state.baseCodeState = (await fingerprint(project)).codeState;
     }
@@ -438,18 +457,47 @@ async function finish(project, options) {
   const { report: { checks }, exitCode } = await recordChecks(project, { ...options, phase: 'task' });
   const failed = checks.checks.filter(check => !['PASS', 'SKIPPED'].includes(check.status)).map(check => check.id);
   const summary = { checks: checks.status, verification: checks.verification, failed };
+  // Consecutive failed check runs; the third stops the run (design peos-next.md §5).
+  const directory = await runDirectory(project, options.run);
+  await withLock(directory, async () => {
+    const state = await readState(directory);
+    state.verifyFailures = checks.status === 'PASS' ? 0 : (state.verifyFailures ?? 0) + 1;
+    await writeState(directory, state);
+  });
   if (checks.status !== 'PASS') return { report: { run: options.run, stage: 'verify', ...summary }, exitCode };
   await advance(project, { ...options, to: 'evaluate' });
   return { report: { stage: 'evaluate', ...summary, ...await changes(project, options) }, exitCode };
 }
 
-const handlers = { init, status, brief, begin, finish, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step, grant, changes, 'record-baseline': recordBaseline, map, setup,
+// A large run's milestone is done once its steps passed checks and evaluation.
+async function completeMilestone(project, options) {
+  const directory = await runDirectory(project, options.run);
+  return withLock(directory, async () => {
+    const state = await readState(directory);
+    state.milestones = { ...state.milestones, [options.milestone]: 'done' };
+    // Its code evaluations judged only the criteria in its scope; the next milestone starts
+    // a new series, so a scoped PASS is never reused as the final evaluation.
+    // The last milestone's evaluations judged every criterion and are the release evidence.
+    for (const key of options.final ? [] : Object.keys(state.evals).filter(key => !gateForEval[key])) {
+      delete state.evals[key];
+      for (const suffix of ['prev', 'reset']) await rm(resolve(directory, 'evals', `${key}.${suffix}.json`), { force: true });
+    }
+    await writeState(directory, state);
+    return { run: state.run, milestones: state.milestones };
+  });
+}
+// The run's control flow: the next action for the orchestrator (design peos-next.md).
+function nextAction(project, options) {
+  return next(project, options, { status, advance, step, recordEval, changes, map, setup, completeMilestone });
+}
+
+const handlers = { init, status, brief, begin, finish, next: nextAction, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step, grant, changes, 'record-baseline': recordBaseline, map, setup,
   fingerprint: project => fingerprint(project) };
 
 await main(async () => {
   const [action, ...rest] = process.argv.slice(2);
   if (!Object.hasOwn(actions, action)) fail('INVOCATION', `First argument must be an action: ${Object.keys(actions).join(', ')}.`);
-  const options = parseArgs(rest, actions[action]);
+  const options = parseArgs(rest, actions[action], ['json', ...(runFlags[action] ?? [])]);
   const project = await projectDirectory(options.project);
   const outcome = await handlers[action](project, options);
   const { report, exitCode = 0 } = ['record-checks', 'record-baseline', 'finish'].includes(action) ? outcome : { report: outcome };
@@ -473,7 +521,7 @@ await main(async () => {
   if (report.action === 'record-checks') return `${report.checks.status}: checks recorded for ${report.run}${report.checks.codeState ? '' : ` — ${report.checks.codeStateNote}`}`;
   if (report.action === 'record-eval') return `${report.verdict}: ${report.key} round ${report.round} recorded for ${report.run}`;
   if (report.action === 'setup') return [
-    `config: ${report.config} (${report.checks.join('; ')})`,
+    report.config === 'deferred' ? 'config: deferred (empty project: an app run configures checks after its walking skeleton)' : `config: ${report.config} (${report.checks.join('; ')})`,
     ...(report.addedChecks.length ? [`checks added: ${report.addedChecks.join('; ')}`] : []),
     ...(report.suggestedChecks.length ? [`checks to add after the active run: ${report.suggestedChecks.join('; ')}`] : []),
     ...Object.entries(report.instructions).map(([file, state]) => `${file}: ${state}`),
@@ -481,5 +529,6 @@ await main(async () => {
   ].join('\n');
   if (report.action === 'finish') return `${report.run}: ${report.checks} checks, stage ${report.stage}${report.failed.length ? `, failed: ${report.failed.join(', ')}` : ''}`;
   if (report.action === 'init') return `Run ${report.run} created at ${JSON.stringify(report.directory)}.`;
+  if (report.action === 'next') return `${report.run} at ${report.stage}: ${report.do}${report.message ? ` — ${report.message}` : ''}`;
   return `${report.action}: ${report.run} updated.`;
 });

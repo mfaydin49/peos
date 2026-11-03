@@ -13,9 +13,14 @@ export const runActions = {
   step: ['project', 'run', 'step', 'status'],
   begin: ['project', 'run', 'step'],
   finish: ['project', 'run', 'step'],
+  next: ['project', 'run', 'done'],
   grant: ['project', 'action', 'target', 'run'],
   changes: ['project', 'run'],
   'record-baseline': ['project', 'run'],
   map: ['project', 'run'],
   setup: ['project']
+};
+// Options that take no value, per action (besides --json).
+export const runFlags = {
+  next: ['evidence-round']
 };
