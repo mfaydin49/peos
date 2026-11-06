@@ -1,8 +1,9 @@
-import { lstat, open } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, writeFile } from 'node:fs/promises';
 import { dirname, extname, resolve } from 'node:path';
 import { fail, ToolkitError } from './cli.mjs';
 import { git } from './git.mjs';
 import { testPath } from './changes.mjs';
+import { writeAtomic } from './run-state.mjs';
 
 // Code map (idea from dietrichgebert/ponytail, reimplemented): the top-level names each
 // source folder defines, so planners and implementers can reuse before writing. Regex per
@@ -27,6 +28,41 @@ const fileLimit = 4000;
 const readLimit = 200 * 1024;
 const perFile = 12;
 const perFolder = 40;
+// The map is kept in the project, for every agent to read: code-map.md, with the names
+// each file defines in code-map.json, keyed by the file's size and modification time, so
+// only new or changed files are read again and code-map.md is rewritten only when the
+// names changed. The folder's own .gitignore keeps both out of Git and the code state.
+export const cacheFolder = '.project-os/cache';
+export const codeMapPath = `${cacheFolder}/code-map.md`;
+const cachePath = `${cacheFolder}/code-map.json`;
+// Bump when the patterns or limits above change, so old entries are not reused.
+const cacheVersion = 1;
+// A file written this recently may change again within the same timestamp; it is read next time.
+const settleMs = 2000;
+
+async function realDirectory(path) {
+  const current = await lstat(path).catch(() => null);
+  return Boolean(current?.isDirectory() && !current.isSymbolicLink());
+}
+// The map is kept only where PEOS is set up; it never creates .project-os.
+async function cacheUsable(project) {
+  if (!await realDirectory(resolve(project, '.project-os'))) return false;
+  return !await lstat(resolve(project, cacheFolder)).catch(() => null) || realDirectory(resolve(project, cacheFolder));
+}
+async function loadCache(project) {
+  if (!await cacheUsable(project)) return null;
+  try {
+    const cache = JSON.parse(await readFile(resolve(project, cachePath), 'utf8'));
+    return cache?.version === cacheVersion && cache.files && typeof cache.files === 'object' ? cache.files : {};
+  } catch { return {}; }
+}
+async function cacheFile(project, path, text) {
+  const folder = resolve(project, cacheFolder);
+  await mkdir(folder, { recursive: true });
+  const ignore = resolve(folder, '.gitignore');
+  if (!await lstat(ignore).catch(() => null)) await writeFile(ignore, '*\n');
+  await writeAtomic(resolve(project, path), text);
+}
 
 async function definitions(path, kind) {
   const handle = await open(path, 'r').catch(() => null);
@@ -56,11 +92,20 @@ export async function codeMap(project, budget = 6000) {
     throw error;
   }
   const files = listed.filter(path => language[extname(path)] && !skipped.test(path) && !minified.test(path) && !testPath.test(path)).slice(0, fileLimit);
+  const cached = await loadCache(project);
+  const kept = {};
+  let read = 0;
   const folders = new Map();
   for (const path of files) {
     const current = await lstat(resolve(project, path)).catch(() => null);
     if (!current?.isFile()) continue;
-    const found = await definitions(resolve(project, path), language[extname(path)]);
+    const key = `${current.size}:${current.mtimeMs}`;
+    let found = cached?.[path]?.key === key ? cached[path].names : null;
+    if (!Array.isArray(found)) {
+      found = await definitions(resolve(project, path), language[extname(path)]);
+      read++;
+    }
+    if (cached) kept[path] = { key: Date.now() - current.mtimeMs < settleMs ? null : key, names: found };
     if (!found.length) continue;
     const folder = dirname(path) === '.' ? '.' : dirname(path);
     if (!folders.has(folder)) folders.set(folder, []);
@@ -85,5 +130,11 @@ export async function codeMap(project, budget = 6000) {
     used += line.length + 1;
   }
   if (omitted) lines.push(`… ${omitted} more folder(s) omitted (budget ${budget} characters); search the code for them.`);
-  return { map: lines.join('\n'), folders: folders.size, files: files.length, truncated: omitted + shortened > 0 };
+  const map = lines.join('\n');
+  if (!cached) return { map, folders: folders.size, files: files.length, read, truncated: omitted + shortened > 0, path: null, changed: false };
+  if (read || Object.keys(cached).some(path => !Object.hasOwn(kept, path))) await cacheFile(project, cachePath, `${JSON.stringify({ version: cacheVersion, files: kept })}\n`);
+  const text = `# Code map\n\nTop-level names per folder (regex-based; nested and dynamic definitions are missed). Kept current by peos-run.\n\n${map}\n`;
+  const changed = await readFile(resolve(project, codeMapPath), 'utf8').catch(() => null) !== text;
+  if (changed) await cacheFile(project, codeMapPath, text);
+  return { map, folders: folders.size, files: files.length, read, truncated: omitted + shortened > 0, path: resolve(project, codeMapPath), changed };
 }

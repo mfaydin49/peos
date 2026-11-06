@@ -8,6 +8,7 @@ import { fail, ToolkitError } from './cli.mjs';
 import { loadConfig } from './config.mjs';
 import { digest, signature } from './eval-report.mjs';
 import { headCommit } from './git.mjs';
+import { codeMapPath } from './map.mjs';
 import { gateArtifacts, gateEvalKeys, readRunFile } from './run-state.mjs';
 
 const toolkit = fileURLToPath(new URL('../../', import.meta.url));
@@ -120,6 +121,7 @@ async function decide(project, context, { options, errors, h }) {
   const investigation = await exists(path('investigation.md')) ? path('investigation.md') : undefined;
   const idea = await exists(path('idea.md')) ? path('idea.md') : undefined;
   const architecture = state.gates.architecture ? path('architecture.md') : undefined;
+  const mapPath = resolve(project, codeMapPath);
   // A refused transition is the user's to resolve; its reason is the message.
   const advance = async to => {
     try { await h.advance(project, { run, to }); }
@@ -140,12 +142,12 @@ async function decide(project, context, { options, errors, h }) {
     const revising = state.gates[gate].status === 'revision_requested' && (hash === null || state.gates[gate].artifactHash === hash);
     if (state.tier === 'standard' && gate === 'spec' && !revising && evaluation?.fresh && evaluation.verdict === 'PASS') continue;
     if (state.stage !== gate) return advance(gate);
-    if (gate === 'plan' && !await exists(path('map.md'))) { await h.map(project, { run }); return { applied: 'code map' }; }
+    if (gate === 'plan' && (await h.map(project)).changed) return { applied: 'code map' };
     const output = path(gateArtifacts[gate]);
     const inputs = {
       spec: { request: idea ?? investigation, investigation, type: state.type, tier: state.tier, template: template('spec.md'), output },
       architecture: { spec: path('spec.md'), request: idea, investigation, template: template('architecture.md'), output },
-      plan: { spec: path('spec.md'), architecture, investigation, 'code map': path('map.md'), type: state.type, tier: state.tier,
+      plan: { spec: path('spec.md'), architecture, investigation, 'code map': mapPath, type: state.type, tier: state.tier,
         configuration: resolve(project, '.project-os/engineering.config.json'), template: template('plan.md'), output }
     }[gate];
     const producer = extra => ({ do: 'spawn', agents: [{ agent: producers[gate], inputs: { ...inputs, ...common, ...extra } }], then: 'next' });
@@ -164,7 +166,7 @@ async function decide(project, context, { options, errors, h }) {
       const evaluatorInputs = {
         spec: { spec: output, request: idea ?? investigation },
         architecture: { focus: 'architecture', architecture: output, spec: path('spec.md'), request: idea, investigation },
-        plan: { plan: output, spec: path('spec.md'), architecture, investigation, 'code map': path('map.md') }
+        plan: { plan: output, spec: path('spec.md'), architecture, investigation, 'code map': mapPath }
       }[gate];
       return { do: 'spawn', then: 'next', agents: [{ agent: gateEvaluators[gate], inputs: { ...evaluatorInputs, profile, subject: hash, report,
         ...(previous ? { 'previous blocking findings': digest(previous).blocking, round: 'later round: check that these are fixed and nothing broke' } : {}),
@@ -197,9 +199,7 @@ async function decide(project, context, { options, errors, h }) {
   const milestones = milestonesOf(plan, state);
   const current = milestones.find(milestone => state.milestones?.[milestone.id] !== 'done' && !milestone.implicit) ?? (milestones[0].implicit ? milestones[0] : null);
   if (!codeStages.includes(state.stage) && state.stage !== 'release') {
-    const outcome = await advance('implement');
-    if (outcome.applied && !await exists(path('map.md'))) await h.map(project, { run });
-    return outcome;
+    return advance('implement');
   }
   if (state.stage === 'release') {
     // Code changed after the release stage was reached: its evidence no longer holds.
@@ -218,7 +218,6 @@ async function decide(project, context, { options, errors, h }) {
     return { do: 'finished', summary: path('summary.md') };
   }
   const specPath = path(gated ? 'spec.md' : 'task.md');
-  const mapPath = path('map.md');
   const checks = checkLines(config);
 
   // A refactor proves the existing checks pass before anything changes.
@@ -249,6 +248,8 @@ async function decide(project, context, { options, errors, h }) {
       await h.step(project, { run, step: remaining.join(','), status: 'in_progress' });
       return { applied: `steps ${remaining.join(',')} started` };
     }
+    // The implementer works from the current map: earlier steps and milestones add names.
+    if ((await h.map(project)).changed) return { applied: 'code map' };
     return { do: 'spawn', then: 'next --done <the step IDs the implementer reported DONE>', agents: [{ agent: 'peos:implementer',
       inputs: { ...implementerInputs, steps: remaining, ...(scope ? { milestone: current.id } : {}) } }] };
   }
@@ -275,6 +276,7 @@ async function decide(project, context, { options, errors, h }) {
     const report = await readJson(directory, 'checks.json');
     const failed = (report?.checks ?? []).filter(check => !['PASS', 'SKIPPED'].includes(check.status)).map(check => check.id);
     if ((state.verifyFailures ?? 0) >= 3) return { do: 'stop', code: 'CHECKS', failed, message: `Checks still fail after three attempts: ${failed.join(', ')}. Show the user which checks fail; after a fix by hand, /peos:continue records them again.` };
+    if ((await h.map(project)).changed) return { applied: 'code map' };
     return { do: 'spawn', then: 'next', agents: [{ agent: 'peos:implementer',
       inputs: { ...implementerInputs, 'failed checks': failed, note: 'logs are suppressed; rerun these checks yourself' } }] };
   }
@@ -327,6 +329,7 @@ async function decide(project, context, { options, errors, h }) {
       const report = cleared ?? await readJson(directory, `evals/${key}.json`);
       if (report) { findings.push(...digest(report).blocking.map(finding => ({ evaluation: key, ...finding }))); unmetCriteria.push(...digest(report).unmetCriteria); }
     }
+    if ((await h.map(project)).changed) return { applied: 'code map' };
     return { do: 'spawn', then: 'next', agents: [{ agent: 'peos:implementer', inputs: { ...implementerInputs, findings, 'unmet criteria': [...new Set(unmetCriteria)],
       note: 'If every blocking finding only lacks check evidence and no code needs to change, do not spawn the implementer: call next --evidence-round instead.' } }] };
   }

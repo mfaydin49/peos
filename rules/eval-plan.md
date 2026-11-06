@@ -1,7 +1,7 @@
 # Plan evaluation rubric
 
-Input: `spec.md`, `plan.md`, `investigation.md` and `map.md` when given, and the project
-files the plan names.
+Input: `spec.md`, `plan.md`, `investigation.md` and the code map
+(`.project-os/cache/code-map.md`) when given, and the project files the plan names.
 
 Blocking (`high` or `critical`):
 

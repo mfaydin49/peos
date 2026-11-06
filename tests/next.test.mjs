@@ -60,7 +60,9 @@ test('a small run goes from task.md through implementer, checks and evaluation t
   assert.deepEqual(implement.agents[0].inputs.steps, ['S1']);
   assert.match(implement.then, /--done/);
   assert.ok(implement.applied.includes('stage implement'));
+  assert.doesNotMatch(await readFile(implement.agents[0].inputs['code map'], 'utf8'), /toCsv/);
   await writeFile(resolve(project, 'base.txt'), 'exported\n');
+  await writeFile(resolve(project, 'export.js'), 'export function toCsv() {}\n');
   const finish = next(project, name, ['--done', 'S1']);
   assert.deepEqual([finish.do, finish.command], ['run', 'finish']);
   assert.equal(cliRun(project, 'finish', finish.args).stage, 'evaluate');
@@ -220,6 +222,7 @@ test('a large run decides each gate, then implements, checks and evaluates miles
   assert.deepEqual([first.agents[0].inputs.steps, first.agents[0].inputs.milestone], [['S1'], 'M1']);
   assert.match(first.agents[0].inputs.dependencies, /approved architecture/);
   await writeFile(resolve(project, 'base.txt'), 'skeleton\n');
+  await writeFile(resolve(project, 'skeleton.js'), 'export function startServer() {}\n');
   cliRun(project, 'finish', next(project, name, ['--done', 'S1']).args);
   const evaluate = next(project, name);
   assert.deepEqual(evaluate.agents.map(entry => entry.inputs.focus), ['acceptance', 'quality', 'tests']);
@@ -229,6 +232,8 @@ test('a large run decides each gate, then implements, checks and evaluates miles
   const second = next(project, name);
   assert.ok(second.applied.includes('milestone M1 done'));
   assert.deepEqual([second.stage, second.agents[0].inputs.steps], ['implement', ['S2']]);
+  assert.ok(second.applied.includes('code map'), 'names M1 added reach the next implementer');
+  assert.match(await readFile(second.agents[0].inputs['code map'], 'utf8'), /skeleton\.js\(startServer\)/);
   await writeFile(resolve(project, 'base.txt'), 'export\n');
   cliRun(project, 'finish', next(project, name, ['--done', 'S2']).args);
   const last = next(project, name);

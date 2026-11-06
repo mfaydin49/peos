@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, unlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { check, config, git, jsonCli, repository, saveConfig } from './helpers.mjs';
@@ -546,9 +546,42 @@ test('the code map lists top-level names per folder, shared code first, without 
   assert.ok(lines.includes('tools/: build.py(build, Builder)'));
   assert.ok(lines.includes('svc/: handler.go(Handle, Server)'));
   assert.doesNotMatch(report.map, /notListed|vendored|hidden|_private|helper/);
-  const written = run(project, 'map', ['--run', name]).report;
-  assert.equal(written.mapPath, resolve(dir, 'map.md'));
-  assert.match(await readFile(written.mapPath, 'utf8'), /formatDate/);
+  assert.equal(report.path, resolve(project, '.project-os/cache/code-map.md'));
+  assert.match(await readFile(report.path, 'utf8'), /formatDate/);
+  assert.equal(run(project, 'map', ['--run', name]).report.path, report.path, '--run still accepted');
+});
+
+test('the code map is kept in the project and rewritten only when the names change', async t => {
+  const { project } = await start(t, 'small');
+  const past = (seconds = 0) => new Date(Date.now() - 60000 + seconds * 1000);
+  const put = async (path, text, seconds) => {
+    await mkdir(resolve(project, path, '..'), { recursive: true });
+    await writeFile(resolve(project, path), text);
+    await utimes(resolve(project, path), past(seconds), past(seconds));
+  };
+  await put('src/a.js', 'export function alpha() {\n  return 1;\n}\n');
+  await put('src/b.js', 'export class Beta {}\n');
+  const first = run(project, 'map').report;
+  assert.deepEqual([first.read, first.changed], [2, true]);
+  assert.equal(await readFile(resolve(project, '.project-os/cache/.gitignore'), 'utf8'), '*\n');
+  assert.doesNotMatch(git(project, 'status', '--porcelain', '--untracked-files=all'), /cache/, 'kept out of Git and the code state');
+
+  const again = run(project, 'map').report;
+  assert.deepEqual([again.read, again.changed], [0, false], 'unchanged files are not read again');
+
+  await put('src/a.js', 'export function alpha() {\n  return 2;\n}\n', 5);
+  const body = run(project, 'map').report;
+  assert.deepEqual([body.read, body.changed], [1, false], 'a change inside a function leaves the map as it is');
+
+  await put('src/a.js', 'export function alpha() {\n  return 2;\n}\nexport function gamma() {}\n', 10);
+  const added = run(project, 'map').report;
+  assert.deepEqual([added.read, added.changed], [1, true]);
+  assert.match(await readFile(added.path, 'utf8'), /a\.js\(alpha, gamma\)/);
+
+  await unlink(resolve(project, 'src/b.js'));
+  const removed = run(project, 'map').report;
+  assert.deepEqual([removed.read, removed.changed], [0, true]);
+  assert.doesNotMatch(await readFile(removed.path, 'utf8'), /Beta/);
 });
 
 test('floor guard and markers ignore ordinary code, prose and dependency bumps', async t => {

@@ -22,8 +22,8 @@ Work, for each step in the order given (finish one, with its tests passing, befo
 starting the next):
 
 1. Read the step, the acceptance criteria it covers and the code it touches. Reuse
-   existing modules, patterns and test helpers; the code map (`map.md`), when given,
-   lists what the project already defines.
+   existing modules, patterns and test helpers; the code map
+   (`.project-os/cache/code-map.md`), when given, lists what the project already defines.
 2. Write the tests the step names together with the code, derived from its acceptance
    criteria. A bug fix starts with a test that fails before the fix.
 3. Change only the files the step lists, plus what those changes strictly require. If

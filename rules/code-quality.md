@@ -8,7 +8,7 @@ not line count. Technology choices and performance budgets belong in project doc
 
 Least new code. Before writing code, take the first answer that works:
 1. Does it need to exist? Name unrequested features or options instead of building them.
-2. Does the codebase already do it? Reuse it (see the run's code map when given).
+2. Does the codebase already do it? Reuse it (see the project's code map, `.project-os/cache/code-map.md`, when given).
 3. Does the language or platform standard library do it?
 4. Does an already installed dependency do it?
 5. Only then write the smallest complete code for it.

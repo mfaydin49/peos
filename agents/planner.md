@@ -27,8 +27,8 @@ Work:
    needs "and". If the whole change would exceed roughly 1000 changed lines, propose
    splitting the work into separate runs under Risks. Restructuring beyond what this
    change needs belongs in its own refactor run, not in a feature plan.
-   When the orchestrator gives a code map (`map.md`), check it before planning new
-   modules: reuse what exists.
+   When the orchestrator gives a code map (`.project-os/cache/code-map.md`), check it
+   before planning new modules: reuse what exists.
    Leave no open decision in the plan: take a reasonable, reversible default and record
    it, as the spec-writer does; ask only what the user alone can decide. If the spec is
    wrong about the code, say so under Risks with the correction you propose.

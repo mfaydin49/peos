@@ -34,8 +34,8 @@ The large tier and `app` runs are added on top of that loop rather than as more 
 - AC-1: `next` returns one action (`do`: `spawn`, `run`, `write`, `gate`, `limit`,
   `blocked`, `stop`, `finished`) for every stage of `trivial`, `small`, `standard` and
   `large` runs, with every input path the agents need.
-- AC-2: `next` applies, without being asked: entering the producer stages, the code
-  map before planning, entering implementation (map and step marks), step completion
+- AC-2: `next` applies, without being asked: entering the producer stages, refreshing
+  the code map before the planner and every implementer, entering implementation (step marks), step completion
   given with `--done`, recording `pending-eval-*.json` reports, milestone completion,
   and entering the release stage.
 - AC-3: A pending report that `record-eval` rejects is renamed to `rejected-eval-*.json`
@@ -156,7 +156,18 @@ Residual risk: the implementer writes the manifests from which the checks are de
 so a weak test script becomes a check. `eval-code` with focus `tests` judges the
 skeleton's tests, and the floor guard flags common weakening.
 
-## 7. State changes
+## 7. Code map
+
+The map is kept in the project, not per run: `.project-os/cache/code-map.md`, with the
+names each file defines in `code-map.json` next to it, keyed by size and modification
+time. `peos-run map` reads only new or changed files (a file modified in the last two
+seconds is read again next time) and rewrites `code-map.md` only when the listed names
+changed; a change inside a function or class body leaves it as it is. The folder's own
+`.gitignore` (`*`) keeps both out of Git and so out of the code state. `next` refreshes
+the map before the planner and before every implementer, so a later milestone sees the
+names earlier ones added; any agent may read it.
+
+## 8. State changes
 
 Optional `state.json` fields: `milestones` (`M<n>` → `done`), `verifyFailures`
 (integer), `bootstrap` (boolean). A `revision_requested` gate keeps the artifact hash

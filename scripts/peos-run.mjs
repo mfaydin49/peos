@@ -356,15 +356,11 @@ async function setup(project) {
   requireRoot(project);
   return setupProject(project);
 }
-// Reuse aid: the code map, printed or written to <run>/map.md for the planner and implementer.
-async function map(project, options) {
+// Reuse aid: the code map, kept in .project-os/cache/code-map.md for every agent and
+// rewritten only when the names it lists changed. --run is accepted for older callers.
+async function map(project) {
   requireRoot(project);
-  const result = await codeMap(project);
-  if (options.run === undefined) return result;
-  const directory = await runDirectory(project, options.run);
-  const mapPath = resolve(directory, 'map.md');
-  await writeAtomic(mapPath, `# Code map\n\nTop-level names per folder (regex-based; nested and dynamic definitions are missed).\n\n${result.map}\n`);
-  return { folders: result.folders, mapPath };
+  return codeMap(project);
 }
 // Evaluator input: the net code diff against the run's base commit (excluding run files) and security triggers.
 async function changes(project, options) {
@@ -447,7 +443,7 @@ async function step(project, options) {
 // map and steps, and from finished steps through recorded checks to the evaluator input.
 async function begin(project, options) {
   await advance(project, { ...options, to: 'implement' });
-  const { mapPath } = await map(project, options);
+  const { path: mapPath } = await map(project);
   const { steps } = await step(project, { ...options, status: 'in_progress' });
   return { run: options.run, stage: 'implement', steps, mapPath };
 }
@@ -516,7 +512,7 @@ await main(async () => {
     ...(report.usage ? [`usage: ${(report.usage.total / 1e6).toFixed(1)}M tokens in ${report.usage.calls} model calls (budget ${(report.usage.budget / 1e6).toFixed(1)}M for ${report.state.tier})${report.usage.overBudget ? ' — over budget' : ''}`] : [])
   ].join('\n');
   if (report.action === 'fingerprint') return `${report.codeState} (HEAD ${report.head}, ${report.changedPaths} changed paths)`;
-  if (report.action === 'map') return report.mapPath ? `Code map written to ${JSON.stringify(report.mapPath)} (${report.folders} folders).` : report.map || 'No top-level definitions found.';
+  if (report.action === 'map') return report.path ? `Code map ${report.changed ? 'written to' : 'unchanged at'} ${JSON.stringify(report.path)} (${report.folders} folders, ${report.read} file(s) read).` : report.map || 'No top-level definitions found.';
   if (report.action === 'record-baseline') return `${report.baseline.status}: refactor baseline recorded for ${report.run} at ${report.baseline.base.slice(0, 12)}`;
   if (report.action === 'record-checks') return `${report.checks.status}: checks recorded for ${report.run}${report.checks.codeState ? '' : ` — ${report.checks.codeStateNote}`}`;
   if (report.action === 'record-eval') return `${report.verdict}: ${report.key} round ${report.round} recorded for ${report.run}`;
