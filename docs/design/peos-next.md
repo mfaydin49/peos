@@ -117,6 +117,10 @@ answers.
    After the last, the run enters the release stage and `summary.md` is written
    (`write`), then `finished`.
 
+Evaluations in step 7 judge only the change since their last report when they have one
+(`basis: delta`), and a passed evaluation is carried over a change that needs no
+evaluator ([eval-economy.md](eval-economy.md)).
+
 `--evidence-round` makes step 7 spawn the failed evaluators again on the unchanged code
 with their previous report instead of the implementer, for findings that only lack
 check evidence.

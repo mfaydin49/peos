@@ -5,9 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { main, parseArgs, projectDirectory, fail, ToolkitError } from './lib/cli.mjs';
 import { validateEvalReport, evalKey, digest, signature } from './lib/eval-report.mjs';
 import { runActions, runFlags } from './lib/run-actions.mjs';
-import { next } from './lib/next.mjs';
+import { next, planDigest } from './lib/next.mjs';
 import { consumeGrant, insideClaudeCode, writeGrant } from './lib/grants.mjs';
-import { codeChanges } from './lib/changes.mjs';
+import { codeChanges, treeChanges } from './lib/changes.mjs';
+import { snapshotTree, treeExists } from './lib/snapshot.mjs';
 import { codeMap } from './lib/map.mjs';
 import { emptyProject, setupProject } from './lib/setup.mjs';
 import { summarizeUsage, usageFile } from './lib/usage.mjs';
@@ -105,7 +106,7 @@ async function init(project, options) {
   try { await mkdir(directory); }
   catch (error) { if (error.code === 'EEXIST') fail('RUN_EXISTS', 'A run with this name already exists today.'); throw error; }
   // Evidence and state are working files; committed artifacts are the Markdown documents.
-  await writeFile(resolve(directory, '.gitignore'), 'state.json\nstate.lock\nchecks.json\nbaseline-checks.json\nchanges.diff\nmap.md\nevals/\npending-eval.json\npending-eval-*.json\nrejected-eval-*.json\n.stop-block\nusage.json\n*.tmp-*\n');
+  await writeFile(resolve(directory, '.gitignore'), 'state.json\nstate.lock\nchecks.json\nbaseline-checks.json\nchanges.diff\ndelta-*.diff\nmap.md\nevals/\npending-eval.json\npending-eval-*.json\nrejected-eval-*.json\n.stop-block\nusage.json\n*.tmp-*\n');
   const now = new Date().toISOString();
   const state = { schemaVersion: 1, run, type, tier, stage: 'intake',
     gates: Object.fromEntries(tierGates[tier].map(gate => [gate, { status: 'pending' }])),
@@ -246,6 +247,16 @@ async function recordEval(project, options) {
     else await rm(resolve(evals, `${key}.prev.json`), { force: true });
     await rm(resolve(evals, `${key}.reset.json`), { force: true });
     state.evals[key] = { verdict: report.verdict, round, subject: report.subject };
+    // A code evaluation keeps a snapshot of what it judged; the next one can judge only the change since.
+    if (!gate) {
+      const tree = await snapshotTree(project);
+      if (tree && await currentCodeState(project) === report.subject) state.evals[key].tree = tree;
+      if (state.evalBases?.[key]) {
+        delete state.evalBases[key];
+        if (!Object.keys(state.evalBases).length) delete state.evalBases;
+        await rm(resolve(evals, `${key}.base.json`), { force: true });
+      }
+    }
     // A plan evaluated against an older spec no longer counts.
     if (key === 'spec' && previous?.subject !== report.subject) delete state.evals.plan;
     await writeState(directory, state);
@@ -282,19 +293,42 @@ async function approve(project, options) {
     if (assessment.gates[gate].fresh) return { run: state.run, gate, gates: state.gates };
     // A new approval changes what later artifacts were built on, so later gates must be re-evaluated and re-approved.
     reopenLater(state, gate);
-    // A newly approved plan is implemented from its first step: progress, code evaluations
-    // and the summary of an earlier plan no longer describe it.
-    if (decided.includes('plan') && (Object.keys(state.steps).length || state.milestones)) {
-      state.steps = {};
-      delete state.milestones;
-      for (const key of Object.keys(state.evals).filter(key => !gateForEval[key])) delete state.evals[key];
-      await rm(resolve(directory, 'summary.md'), { force: true });
+    // A re-approved plan keeps the steps and milestones whose digest did not change; the
+    // rest is implemented again, and passed code evaluations become the bases of the next
+    // ones (eval-economy.md). The summary of the earlier plan no longer describes the run.
+    if (decided.includes('plan')) {
+      const digest = planDigest(await readRunFile(directory, 'plan.md') ?? '', await readRunFile(directory, 'spec.md'), await readRunFile(directory, 'architecture.md'));
+      if (Object.keys(state.steps).length || state.milestones) {
+        const old = state.planDigest;
+        const steps = Object.fromEntries(Object.entries(state.steps).filter(([id, status]) => status === 'done' && old?.steps[id] && old.steps[id] === digest.steps[id]));
+        const milestones = Object.fromEntries(Object.keys(state.milestones ?? {})
+          .filter(id => old?.milestones[id] && old.milestones[id] === digest.milestones[id] && digest.members[id].every(step => steps[step] === 'done')).map(id => [id, 'done']));
+        state.steps = steps;
+        if (Object.keys(milestones).length) state.milestones = milestones; else delete state.milestones;
+        await keepAsBases(directory, state);
+        await rm(resolve(directory, 'summary.md'), { force: true });
+      }
+      state.planDigest = { steps: digest.steps, milestones: digest.milestones };
     }
     const at = new Date().toISOString();
     for (const name of decided) state.gates[name] = { status: 'approved', by: 'human', artifactHash: assessment.artifacts[name], at };
     await writeState(directory, state);
     return { run: state.run, gate, gates: state.gates };
   });
+}
+// Passed code evaluations with a snapshot become bases: the next evaluation of the key
+// judges the change since then with its report; others are dropped.
+async function keepAsBases(directory, state) {
+  for (const key of Object.keys(state.evals).filter(key => !gateForEval[key])) {
+    const evaluation = state.evals[key];
+    delete state.evals[key];
+    for (const suffix of ['prev', 'reset']) await rm(resolve(directory, 'evals', `${key}.${suffix}.json`), { force: true });
+    if (evaluation.verdict !== 'PASS' || !evaluation.tree) continue;
+    const report = await readRunFile(resolve(directory, 'evals'), `${key}.json`).catch(() => null);
+    if (report === null) continue;
+    await writeAtomic(resolve(directory, 'evals', `${key}.base.json`), report);
+    state.evalBases = { ...state.evalBases, [key]: { tree: evaluation.tree } };
+  }
 }
 function reopenLater(state, gate) {
   for (const name of gateOrder.slice(gateOrder.indexOf(gate) + 1).filter(name => Object.hasOwn(state.gates, name))) {
@@ -368,13 +402,64 @@ async function changes(project, options) {
   const state = await readState(directory);
   if (!state.baseHead) fail('TRANSITION', 'The run has not entered implementation yet.');
   const before = await fingerprint(project);
-  const { files, securityTriggers, modifiedTests, floorFlags, shortcuts, diff, truncated } = await codeChanges(project, state.baseHead);
+  const { files, securityTriggers, modifiedTests, floorFlags, shortcuts, diff, truncated, bytes } = await codeChanges(project, state.baseHead);
   const { codeState } = await fingerprint(project);
   // The diff must describe exactly the code state evaluators will certify.
   if (codeState !== before.codeState) fail('UNSTABLE', 'The code changed while the diff was computed; run changes again.');
   const diffPath = resolve(directory, 'changes.diff');
   await writeAtomic(diffPath, diff);
-  return { run: state.run, base: state.baseHead, codeState, files, securityTriggers, modifiedTests, floorFlags, shortcuts, diffPath, truncated };
+  return { run: state.run, base: state.baseHead, codeState, files, securityTriggers, modifiedTests, floorFlags, shortcuts, diffPath, truncated, diffBytes: bytes };
+}
+// Delta evaluation input: the change from an evaluation's snapshot to the current code.
+// tree: null when Git no longer has the snapshot (the evaluation is then a full one).
+async function delta(project, options) {
+  const directory = await runDirectory(project, options.run);
+  const state = await readState(directory);
+  if (!state.baseHead) fail('TRANSITION', 'The run has not entered implementation yet.');
+  if (!treeExists(project, options.since)) return { run: state.run, since: options.since, tree: null };
+  const before = await fingerprint(project);
+  const tree = await snapshotTree(project);
+  if (!tree) return { run: state.run, since: options.since, tree: null };
+  const change = treeChanges(project, options.since, tree);
+  if ((await fingerprint(project)).codeState !== before.codeState) fail('UNSTABLE', 'The code changed while the delta was computed; run delta again.');
+  const deltaPath = resolve(directory, `delta-${options.since.slice(0, 12)}.diff`);
+  await writeAtomic(deltaPath, change.diff);
+  return { run: state.run, since: options.since, tree, codeState: before.codeState, deltaPath, bytes: change.bytes, truncated: change.truncated,
+    empty: change.files.length === 0, files: change.files.map(file => file.path), securityTriggers: change.securityTriggers };
+}
+// A passed evaluation carried to the current code without an evaluator: over an empty
+// change, or for security over a change with no security trigger. The policy is checked
+// here, not taken from the caller.
+async function carryEval(project, options) {
+  const directory = await runDirectory(project, options.run);
+  return withLock(directory, async () => {
+    const state = await readState(directory);
+    const key = options.key;
+    if (gateForEval[key] || !/^(?:code-[a-z]+|security)$/.test(key ?? '')) fail('INVOCATION', '--key must be a code or security evaluation.');
+    const current = state.evals[key];
+    // A base kept at a milestone boundary or plan re-approval judged another scope or plan:
+    // only the security evaluation, which judges no criteria, carries from one.
+    const base = current ? (current.verdict === 'PASS' ? current.tree : null) : key === 'security' ? state.evalBases?.[key]?.tree : null;
+    if (!base || !treeExists(project, base)) fail('CARRY', `${key} has no passed snapshot of the same scope to carry.`);
+    const codeState = await currentCodeState(project);
+    const tree = await snapshotTree(project);
+    if (!codeState || !tree) fail('CARRY', 'The current code state could not be snapshotted.');
+    const change = treeChanges(project, base, tree);
+    if (change.files.length && !(key === 'security' && !change.securityTriggers.length)) fail('CARRY', `The change since ${key} passed needs an evaluator.`);
+    if (await currentCodeState(project) !== codeState) fail('UNSTABLE', 'The code changed while the evaluation was carried.');
+    const evals = await runSubdirectory(directory, 'evals');
+    const source = await readRunFile(evals, current ? `${key}.json` : `${key}.base.json`);
+    if (source === null) fail('CARRY', `The ${key} report is missing.`);
+    await writeJsonAtomic(resolve(evals, `${key}.json`), { ...JSON.parse(source), subject: codeState });
+    state.evals[key] = { verdict: 'PASS', round: 1, subject: codeState, tree, carried: true };
+    if (state.evalBases?.[key]) {
+      delete state.evalBases[key];
+      if (!Object.keys(state.evalBases).length) delete state.evalBases;
+      await rm(resolve(evals, `${key}.base.json`), { force: true });
+    }
+    await writeState(directory, state);
+    return { run: state.run, key, verdict: 'PASS', carried: true, changedFiles: change.files.length };
+  });
 }
 async function advance(project, options) {
   const directory = await runDirectory(project, options.run);
@@ -474,20 +559,18 @@ async function completeMilestone(project, options) {
     // Its code evaluations judged only the criteria in its scope; the next milestone starts
     // a new series, so a scoped PASS is never reused as the final evaluation.
     // The last milestone's evaluations judged every criterion and are the release evidence.
-    for (const key of options.final ? [] : Object.keys(state.evals).filter(key => !gateForEval[key])) {
-      delete state.evals[key];
-      for (const suffix of ['prev', 'reset']) await rm(resolve(directory, 'evals', `${key}.${suffix}.json`), { force: true });
-    }
+    // They stay as bases, so the next milestone's evaluations judge only what it changes.
+    if (!options.final) await keepAsBases(directory, state);
     await writeState(directory, state);
     return { run: state.run, milestones: state.milestones };
   });
 }
 // The run's control flow: the next action for the orchestrator (design peos-next.md).
 function nextAction(project, options) {
-  return next(project, options, { status, advance, step, recordEval, changes, map, setup, completeMilestone });
+  return next(project, options, { status, advance, step, recordEval, changes, delta, carryEval, map, setup, completeMilestone });
 }
 
-const handlers = { init, status, brief, begin, finish, next: nextAction, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step, grant, changes, 'record-baseline': recordBaseline, map, setup,
+const handlers = { init, status, brief, begin, finish, next: nextAction, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step, grant, changes, delta, 'carry-eval': carryEval, 'record-baseline': recordBaseline, map, setup,
   fingerprint: project => fingerprint(project) };
 
 await main(async () => {

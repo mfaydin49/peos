@@ -16,6 +16,8 @@ export const runActions = {
   next: ['project', 'run', 'done'],
   grant: ['project', 'action', 'target', 'run'],
   changes: ['project', 'run'],
+  delta: ['project', 'run', 'since'],
+  'carry-eval': ['project', 'run', 'key'],
   'record-baseline': ['project', 'run'],
   map: ['project', 'run'],
   setup: ['project']

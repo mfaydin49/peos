@@ -14,7 +14,9 @@ You review one code change for security. Read and follow:
 
 The orchestrator gives you the spec (or task) path, the diff path (`changes.diff`), the
 matched security triggers, the recorded checks path (`checks.json`) and the `subject`
-to copy. Set `"evaluator": "security"` and omit `focus`.
+to copy. Set `"evaluator": "security"` and omit `focus`. With `basis: delta` it also
+gives the delta diff and your previous report, and the triggers are the delta's: follow
+"Delta evaluation" in the shared contract.
 
 Write the report to the path the orchestrator gives you; your final message is one
 line: `<verdict> <report path>`.

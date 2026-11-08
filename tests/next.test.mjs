@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { check, config, fixture, git, jsonCli, repository, saveConfig } from './helpers.mjs';
-import { parsePlan } from '../scripts/lib/next.mjs';
+import { parsePlan, planDigest } from '../scripts/lib/next.mjs';
 
 const cliRun = (project, action, args = []) => jsonCli('peos-run.mjs', [action, '--project', project, ...args]).report;
 // The user's decision commands leave a grant; the CLI records one outside Claude Code.
@@ -238,6 +238,11 @@ test('a large run decides each gate, then implements, checks and evaluates miles
   cliRun(project, 'finish', next(project, name, ['--done', 'S2']).args);
   const last = next(project, name);
   assert.equal(last.agents[0].inputs['criteria in scope'], undefined, 'the last milestone judges every criterion');
+  // M1's passed evaluations are bases: quality and tests judge only M2's change, acceptance judges everything.
+  assert.deepEqual(last.agents.map(entry => [entry.inputs.focus, Boolean(entry.inputs.basis)]), [['acceptance', false], ['quality', true], ['tests', true]]);
+  assert.match(await readFile(last.agents[1].inputs['delta diff'], 'utf8'), /^\+export$/m);
+  assert.doesNotMatch(await readFile(last.agents[1].inputs['delta diff'], 'utf8'), /startServer/);
+  assert.equal(last.agents[1].inputs['previous report'], resolve(dir, 'evals/code-quality.base.json'));
   for (const focus of ['acceptance', 'quality', 'tests']) await report(dir, `code-${focus}`, { evaluator: 'code', focus, verdict: 'PASS', subject: fingerprint(project) });
   const summary = next(project, name);
   assert.deepEqual([summary.do, summary.stage], ['write', 'release'], summary.message);
@@ -350,10 +355,12 @@ test('review regressions: a scoped milestone PASS is not reused, and unstable ch
   cliRun(project, 'finish', next(project, name, ['--done', 'S1']).args);
   for (const focus of ['acceptance', 'quality', 'tests']) await report(dir, `code-${focus}`, { evaluator: 'code', focus, verdict: 'PASS', subject: fingerprint(project) });
   next(project, name);
-  // M2 changes nothing: its evaluations still run, judging every criterion.
+  // M2 changes nothing: M1's scoped reports are not carried; every focus runs in full,
+  // judging every criterion.
   const evaluate = next(project, name, ['--done', 'S2']);
-  assert.deepEqual(agentsOf(evaluate), ['peos:eval-code', 'peos:eval-code', 'peos:eval-code']);
+  assert.deepEqual(evaluate.agents.map(entry => [entry.inputs.focus, entry.inputs.basis]), [['acceptance', undefined], ['quality', undefined], ['tests', undefined]]);
   assert.equal(evaluate.agents[0].inputs['criteria in scope'], undefined);
+  assert.equal(cliRun(project, 'carry-eval', ['--run', name, '--key', 'code-tests']).error.code, 'CARRY', 'a scoped base is never carried');
   // A check that writes files Git sees cannot bind evidence: the run stops instead of looping.
   await writeFile(resolve(project, '.project-os/engineering.config.json'), JSON.stringify(config([check('test', "require('fs').writeFileSync('coverage.txt', String(Date.now()))")])));
   const { project: other, name: small, dir: smallDir } = await start(t, { tier: 'small', checks: [check('test', "require('fs').writeFileSync('coverage.txt', String(Date.now()))")] });
@@ -376,4 +383,63 @@ test('review regressions: an app outside an empty repository needs its configura
   }
   const stop = next(project, name);
   assert.deepEqual([stop.do, stop.code], ['stop', 'CONFIG_MISSING']);
+});
+
+test('after a fix the evaluator judges only the change since its report', async t => {
+  const { project, name, dir } = await start(t, { tier: 'small' });
+  await writeFile(resolve(dir, 'task.md'), '# T\n## Plan\n- S1: x — files: a — covers: AC-1 — test: t\n');
+  next(project, name);
+  await writeFile(resolve(project, 'export.js'), Array.from({ length: 40 }, (_, i) => `export const column${i} = ${i};`).join('\n') + '\n');
+  cliRun(project, 'finish', next(project, name, ['--done', 'S1']).args);
+  assert.equal(next(project, name).agents[0].inputs.basis, undefined, 'the first evaluation is full');
+  await report(dir, 'code-all', { evaluator: 'code', focus: 'all', verdict: 'FAIL', subject: fingerprint(project), findings: [finding()] });
+  next(project, name);
+  await writeFile(resolve(project, 'export.test.js'), 'it("has columns", () => expect(1).toBe(1));\n');
+  cliRun(project, 'finish', next(project, name).args);
+  const again = next(project, name);
+  assert.deepEqual(agentsOf(again), ['peos:eval-code']);
+  assert.match(again.agents[0].inputs.basis, /^delta/);
+  assert.equal(again.agents[0].inputs['previous report'], resolve(dir, 'evals/code-all.json'));
+  assert.equal(again.agents[0].inputs['previous blocking findings'][0].problem, 'AC-1 has no test');
+  const delta = await readFile(again.agents[0].inputs['delta diff'], 'utf8');
+  assert.match(delta, /export\.test\.js/);
+  assert.doesNotMatch(delta, /column1/);
+});
+
+test('re-approving a plan keeps unchanged steps done and reworks only the changed ones', async t => {
+  const { project, name, dir } = await start(t, { tier: 'standard' });
+  await plan(project, name, dir);
+  decide(project, 'approve', '--gate', 'plan', name);
+  next(project, name);
+  await writeFile(resolve(project, 'export.js'), Array.from({ length: 40 }, (_, i) => `export const column${i} = ${i};`).join('\n') + '\n');
+  cliRun(project, 'finish', next(project, name, ['--done', 'S1,S2']).args);
+  await report(dir, 'code-all', { evaluator: 'code', focus: 'all', verdict: 'PASS', subject: fingerprint(project) });
+  assert.equal(next(project, name).do, 'write');
+  // The user revises the plan: S2 changes, S1 stays as it was.
+  decide(project, 'revise', '--gate', 'plan', name);
+  await writeFile(resolve(dir, 'plan.md'), '# Plan\n\n## Steps\n\n### S1 — export\n- Covers: AC-1\n\n### S2 — docs and a changelog\n- Covers: AC-2\n');
+  await report(dir, 'plan', { evaluator: 'plan', verdict: 'PASS', subject: next(project, name).agents[0].inputs.subject });
+  assert.equal(next(project, name).do, 'gate');
+  decide(project, 'approve', '--gate', 'plan', name);
+  const state = JSON.parse(await readFile(resolve(dir, 'state.json')));
+  assert.deepEqual(state.steps, { S1: 'done' });
+  assert.deepEqual(Object.keys(state.evalBases), ['code-all']);
+  const rework = next(project, name);
+  assert.deepEqual(rework.agents[0].inputs.steps, ['S2']);
+  await writeFile(resolve(project, 'CHANGELOG.md'), '- CSV export\n');
+  cliRun(project, 'finish', next(project, name, ['--done', 'S2']).args);
+  // code-all judges the acceptance criteria: after a re-approval it runs in full.
+  const evaluate = next(project, name);
+  assert.deepEqual(agentsOf(evaluate), ['peos:eval-code']);
+  assert.equal(evaluate.agents[0].inputs.basis, undefined);
+});
+
+test('a step digest covers its whole criteria and the architecture', () => {
+  const plan = '## Steps\n### S1 — limit\n- Covers: AC-1\n\n### S2 — docs\n- Covers: AC-2\n';
+  const spec = limit => `## Acceptance criteria\n- AC-1: Requests are limited\n  to ${limit} per minute.\n- AC-2: Docs exist.\n\n## Decisions\n`;
+  const before = planDigest(plan, spec(5), '# Architecture A\n');
+  const wider = planDigest(plan, spec(500), '# Architecture A\n');
+  assert.notEqual(before.steps.S1, wider.steps.S1, 'a continuation line is part of the criterion');
+  assert.equal(before.steps.S2, wider.steps.S2);
+  assert.notEqual(before.steps.S2, planDigest(plan, spec(5), '# Architecture B\n').steps.S2);
 });

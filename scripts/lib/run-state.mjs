@@ -53,14 +53,31 @@ function invalid(where, reason) { fail('STATE', `state.json ${where}: ${reason}`
 function plainObject(value, where) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) invalid(where, 'expected an object');
 }
+const treePattern = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 // Mirrors schemas/state.schema.json; tests check both agree on fixtures.
 export function validateState(input) {
   plainObject(input, 'root');
   const fields = ['schemaVersion', 'run', 'type', 'tier', 'stage', 'gates', 'steps', 'evals', 'checkpoints', 'createdAt', 'updatedAt'];
-  if (Object.keys(input).some(key => !fields.includes(key) && !['configHash', 'baseHead', 'baseCodeState', 'milestones', 'verifyFailures', 'bootstrap'].includes(key)) || fields.some(key => !Object.hasOwn(input, key))) invalid('root', 'unknown or missing field');
+  if (Object.keys(input).some(key => !fields.includes(key) && !['configHash', 'baseHead', 'baseCodeState', 'milestones', 'verifyFailures', 'bootstrap', 'planDigest', 'evalBases'].includes(key)) || fields.some(key => !Object.hasOwn(input, key))) invalid('root', 'unknown or missing field');
   if (Object.hasOwn(input, 'milestones')) {
     plainObject(input.milestones, 'milestones');
     if (Object.entries(input.milestones).some(([id, status]) => !/^M[1-9][0-9]*$/.test(id) || status !== 'done')) invalid('milestones', 'expected M<n>: done');
+  }
+  if (Object.hasOwn(input, 'planDigest')) {
+    plainObject(input.planDigest, 'planDigest');
+    if (Object.keys(input.planDigest).some(key => !['steps', 'milestones'].includes(key))) invalid('planDigest', 'unknown field');
+    for (const [part, pattern] of [['steps', /^S[1-9][0-9]*$/], ['milestones', /^M[1-9][0-9]*$/]]) {
+      plainObject(input.planDigest[part], `planDigest.${part}`);
+      if (Object.entries(input.planDigest[part]).some(([id, hash]) => !pattern.test(id) || typeof hash !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(hash))) invalid(`planDigest.${part}`, 'expected id: sha256:<hex>');
+    }
+  }
+  if (Object.hasOwn(input, 'evalBases')) {
+    plainObject(input.evalBases, 'evalBases');
+    for (const [key, base] of Object.entries(input.evalBases)) {
+      if (!/^[a-z]+(?:-[a-z0-9]+)*$/.test(key)) invalid('evalBases', 'invalid key');
+      plainObject(base, `evalBases.${key}`);
+      if (Object.keys(base).length !== 1 || typeof base.tree !== 'string' || !treePattern.test(base.tree)) invalid(`evalBases.${key}`, 'expected tree');
+    }
   }
   if (Object.hasOwn(input, 'verifyFailures') && (!Number.isSafeInteger(input.verifyFailures) || input.verifyFailures < 0)) invalid('verifyFailures', 'expected a non-negative integer');
   if (Object.hasOwn(input, 'bootstrap') && input.bootstrap !== true) invalid('bootstrap', 'expected true');
@@ -92,7 +109,9 @@ export function validateState(input) {
   for (const [key, summary] of Object.entries(input.evals)) {
     if (!/^[a-z]+(?:-[a-z0-9]+)*$/.test(key)) invalid('evals', 'invalid key');
     plainObject(summary, `evals.${key}`);
-    if (Object.keys(summary).length !== 3 || !['verdict', 'round', 'subject'].every(field => Object.hasOwn(summary, field))) invalid(`evals.${key}`, 'expected verdict, round and subject');
+    if (!['verdict', 'round', 'subject'].every(field => Object.hasOwn(summary, field)) || Object.keys(summary).some(field => !['verdict', 'round', 'subject', 'tree', 'carried'].includes(field))) invalid(`evals.${key}`, 'expected verdict, round and subject');
+    if (Object.hasOwn(summary, 'tree') && (typeof summary.tree !== 'string' || !treePattern.test(summary.tree))) invalid(`evals.${key}.tree`, 'expected a tree ID');
+    if (Object.hasOwn(summary, 'carried') && summary.carried !== true) invalid(`evals.${key}.carried`, 'expected true');
     if (!['PASS', 'FAIL', 'BLOCKED'].includes(summary.verdict)) invalid(`evals.${key}.verdict`, 'unsupported value');
     if (!Number.isSafeInteger(summary.round) || summary.round < 1 || summary.round > 3) invalid(`evals.${key}.round`, 'expected 1 to 3');
     if (typeof summary.subject !== 'string' || !/^(?:fp|sha256):[0-9a-f]{64}$/.test(summary.subject)) invalid(`evals.${key}.subject`, 'invalid subject');

@@ -39,6 +39,14 @@ All arrays are required, even when empty; `file` and `line` are optional. PASS a
   findings: check that they are fixed and that the revision broke nothing; do not repeat
   the full audit. A new blocking finding there must be a real miss, not a stricter reading.
   Evidence a producer or implementer only states is not recorded evidence.
+- Delta evaluation: when the orchestrator gives `basis: delta`, a `delta diff` and your
+  `previous report`, an earlier evaluation already judged the code up to a snapshot.
+  Read the delta diff first; open the full diff or other files only where the delta
+  reaches unchanged code (a changed signature, a moved call, a new caller). Re-judge
+  every criterion, finding and check the delta touches, and judge the criteria newly in
+  scope; carry over the rest of the previous report unchanged, updating only file and
+  line references the delta moved. The report is still complete: every criterion in
+  scope and every finding that still holds. A previous finding the delta fixed is gone.
 - Do not withhold PASS to appear rigorous. A clean input gets PASS with no findings.
 - No concrete case, no finding: `problem` names the input, state or sequence that goes
   wrong; `impact` says what happens if it is not fixed. "Could be cleaner" is not a case.

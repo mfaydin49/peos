@@ -650,3 +650,57 @@ test('threshold flags cover CLI flags and quoted decimals but not versions', asy
   assert.deepEqual(flags.map(flag => flag.file).sort(), ['build.gradle.kts', 'package.json']);
   assert.ok(flags.every(flag => !/"version"/.test(flag.text)), 'version bump is not a threshold');
 });
+
+test('a code evaluation keeps a snapshot, delta shows only the change since it, and carry-eval checks the policy', async t => {
+  const { project, name, dir } = await start(t, 'small');
+  run(project, 'advance', ['--run', name, '--to', 'implement']);
+  await writeFile(resolve(project, 'app.js'), 'export const add = (a, b) => a + b;\n');
+  const indexBefore = git(project, 'diff', '--cached', '--name-only');
+  // The user's hooks do not run for a snapshot.
+  await mkdir(resolve(project, '.git/hooks'), { recursive: true });
+  await writeFile(resolve(project, '.git/hooks/post-index-change'), `#!/bin/sh\ntouch "${resolve(project, '.git/hook-ran')}"\n`, { mode: 0o755 });
+  const codeState = run(project, 'fingerprint').report.codeState;
+  await submit(t, project, name, { evaluator: 'code', focus: 'all', verdict: 'PASS', subject: codeState });
+  await submit(t, project, name, { evaluator: 'security', verdict: 'PASS', subject: codeState });
+  const state = JSON.parse(await readFile(resolve(dir, 'state.json')));
+  const tree = state.evals['code-all'].tree;
+  assert.match(tree, /^[0-9a-f]{40}$/);
+  assert.equal(git(project, 'diff', '--cached', '--name-only'), indexBefore, 'the real index is untouched');
+  assert.equal(run(project, 'fingerprint').report.codeState, codeState, 'the code state is untouched');
+  assert.equal(await readFile(resolve(project, '.git/hook-ran')).catch(() => null), null, 'no hook ran');
+
+  const empty = run(project, 'delta', ['--run', name, '--since', tree]).report;
+  assert.equal(empty.empty, true);
+  await writeFile(resolve(project, 'app.js'), 'export const add = (a, b) => a + b;\nexport const twice = a => add(a, a);\n');
+  const changed = run(project, 'delta', ['--run', name, '--since', tree]).report;
+  assert.deepEqual([changed.empty, changed.files, changed.securityTriggers], [false, ['app.js'], []]);
+  const text = await readFile(changed.deltaPath, 'utf8');
+  assert.match(text, /\+export const twice/);
+  assert.doesNotMatch(text, /engineering\.config|^\+export const add/m, 'only the change since the snapshot');
+  assert.equal(run(project, 'delta', ['--run', name, '--since', 'f'.repeat(40)]).report.tree, null, 'an unknown tree gives a full evaluation');
+
+  // Security carries over a change with no trigger; the code evaluation does not.
+  assert.equal(run(project, 'carry-eval', ['--run', name, '--key', 'code-all']).report.error.code, 'CARRY');
+  const carried = run(project, 'carry-eval', ['--run', name, '--key', 'security']).report;
+  assert.deepEqual([carried.verdict, carried.carried], ['PASS', true]);
+  const after = JSON.parse(await readFile(resolve(dir, 'state.json')));
+  assert.equal(after.evals.security.subject, run(project, 'fingerprint').report.codeState);
+  assert.equal(after.evals.security.carried, true);
+  assert.equal(JSON.parse(await readFile(resolve(dir, 'evals/security.json'))).subject, after.evals.security.subject);
+  await writeFile(resolve(project, 'app.js'), "export const read = () => require('fs').readFileSync(process.argv[2]);\n");
+  assert.equal(run(project, 'carry-eval', ['--run', name, '--key', 'security']).report.error.code, 'CARRY', 'a triggering change needs the evaluator');
+});
+
+test('lock files, project files and large sections are listed in the diff, not shown', async t => {
+  const { project, name } = await start(t, 'small');
+  run(project, 'advance', ['--run', name, '--to', 'implement']);
+  await writeFile(resolve(project, 'package-lock.json'), `${JSON.stringify({ lockfileVersion: 3, packages: { a: { version: '1.0.0' } } }, null, 2)}\n`);
+  await writeFile(resolve(project, 'data.js'), `export const rows = [\n${'  "row",\n'.repeat(9000)}];\n// api_key from the environment\n`);
+  const report = run(project, 'changes', ['--run', name]).report;
+  const diff = await readFile(report.diffPath, 'utf8');
+  assert.match(diff, /package-lock\.json[^\n]*\n\(generated or lock file: \d+ changed line\(s\)/);
+  assert.match(diff, /data\.js[^\n]*\n\(large change: 9\d{3} changed line\(s\)/);
+  assert.doesNotMatch(diff, /"row",\n {2}"row"/);
+  assert.ok(report.securityTriggers.includes('secrets'), 'triggers still see hidden lines');
+  assert.ok(report.securityTriggers.includes('dependencies'));
+});

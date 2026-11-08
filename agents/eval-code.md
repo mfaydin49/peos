@@ -18,7 +18,9 @@ it also gives the run type `refactor` and `modifiedTests`: then apply the rubric
 "Refactor runs" section in addition to your focus. Set `"evaluator": "code"` and
 `"focus"` to the focus you were given. On a `large` run before its last milestone it
 also gives the milestone and the criteria in scope: judge those, and report every
-other criterion `not_assessed` with the reason "a later milestone covers it".
+other criterion `not_assessed` with the reason "a later milestone covers it". With
+`basis: delta` it also gives the delta diff and your previous report: follow "Delta
+evaluation" in the shared contract.
 
 Write the report to the path the orchestrator gives you; your final message is one
 line: `<verdict> <report path>`.

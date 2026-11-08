@@ -161,16 +161,8 @@ export async function codeChanges(project, base) {
     files.push({ status: file.status, path: file.path });
     sections.push({ path: file.path, text: `--- /dev/null\n+++ b/${header(file.path)} (${file.note})\n${await fullContent(project, file.path)}\n` });
   }
-  const triggers = new Set();
-  for (const file of files) {
-    file.categories = categories([file.path]);
-    for (const category of file.categories) if (pathTriggers[category]) triggers.add(pathTriggers[category]);
-  }
-  const added = sections.filter(section => !testPath.test(section.path))
-    .map(section => section.text.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n')).join('\n');
-  for (const [name, pattern] of Object.entries(contentTriggers)) if (pattern.test(added)) triggers.add(name);
-  const diff = sections.map(section => section.text).join('\n');
-  const truncated = diff.length > diffLimit;
+  const securityTriggers = triggersOf(files, sections);
+  const { diff, truncated, bytes } = render(sections);
   // Existing tests changed, retyped or removed since the base: refactors must justify each
   // one. A test moved without content changes (rename score 100) is not listed.
   const renamed = list(git(project, ['diff', '--no-ext-diff', '--no-textconv', '-M', '--name-status', '-z', base, '--', '.', exclude]));
@@ -180,5 +172,47 @@ export async function codeChanges(project, base) {
     if (status.startsWith('R') || status.startsWith('C')) { if (status === 'R100') pureMoves.add(renamed[i]); i += 2; } else i += 1;
   }
   const modifiedTests = files.filter(file => ['M', 'D', 'T', 'H'].includes(file.status) && testPath.test(file.path) && !pureMoves.has(file.path)).map(file => file.path);
-  return { files, securityTriggers: [...triggers].sort(), modifiedTests, floorFlags: floorFlags(sections, files, pureMoves), shortcuts: shortcutMarkers(sections), diff: truncated ? `${diff.slice(0, diffLimit)}\n… diff truncated at ${diffLimit} bytes; read the files directly.\n` : diff, truncated };
+  return { files, securityTriggers, modifiedTests, floorFlags: floorFlags(sections, files, pureMoves), shortcuts: shortcutMarkers(sections), diff, truncated, bytes };
+}
+
+// Security triggers from changed paths and the lines added outside tests.
+function triggersOf(files, sections) {
+  const triggers = new Set();
+  for (const file of files) {
+    file.categories = categories([file.path]);
+    for (const category of file.categories) if (pathTriggers[category]) triggers.add(pathTriggers[category]);
+  }
+  const added = sections.filter(section => !testPath.test(section.path))
+    .map(section => section.text.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n')).join('\n');
+  for (const [name, pattern] of Object.entries(contentTriggers)) if (pattern.test(added)) triggers.add(name);
+  return [...triggers].sort();
+}
+// The diff evaluators read. Generated files and very large sections are listed with their
+// size instead of their content (their triggers and flags were taken before), so the
+// diff stays readable; what remains is cut at diffLimit.
+const generated = /(?:^|\/)(?:package-lock\.json|npm-shrinkwrap\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb?|go\.sum|Cargo\.lock|poetry\.lock|uv\.lock|Pipfile\.lock|Gemfile\.lock|composer\.lock|Podfile\.lock|Package\.resolved|gradle\.lockfile)$|\.(?:pbxproj|xcworkspacedata|map)$|[.-]min\.(?:js|css)$/;
+const sectionLimit = 64 * 1024;
+function render(sections) {
+  const shown = sections.map(({ path, text }) => {
+    if (!generated.test(path) && text.length <= sectionLimit) return text;
+    const lines = text.split('\n');
+    const changed = lines.filter(line => /^[+-](?![+-]{2} )/.test(line)).length;
+    // The header names the file: through its `+++` line when there is one.
+    const head = lines.slice(0, lines.findIndex(line => line.startsWith('+++ ')) + 1 || 1).join('\n');
+    return `${head}\n(${generated.test(path) ? 'generated or lock file' : 'large change'}: ${changed} changed line(s), ${text.length} bytes; not shown, read the file if it matters)\n`;
+  });
+  const diff = shown.join('\n');
+  const truncated = diff.length > diffLimit;
+  return { diff: truncated ? `${diff.slice(0, diffLimit)}\n… diff truncated at ${diffLimit} bytes; read the files directly.\n` : diff, truncated, bytes: diff.length };
+}
+// Changes between two snapshot trees (eval-economy.md): what a delta evaluation reads.
+export function treeChanges(project, from, to) {
+  const list = raw => raw.split('\0').filter(Boolean);
+  const names = list(git(project, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-status', '-z', from, to, '--', '.', exclude]));
+  const files = [];
+  for (let i = 0; i < names.length; i += 2) files.push({ status: names[i], path: names[i + 1] });
+  const sections = git(project, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', from, to, '--', '.', exclude])
+    .split(/^(?=diff --git )/m).filter(Boolean).map(text => ({ path: sectionPath(text), text }));
+  const { diff, truncated, bytes } = render(sections);
+  return { files, securityTriggers: triggersOf(files, sections), diff, truncated, bytes };
 }
