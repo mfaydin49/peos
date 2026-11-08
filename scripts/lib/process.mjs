@@ -3,7 +3,8 @@ import { spawn } from 'node:child_process';
 const OUTPUT_LIMIT = 65536;
 const GRACE_MS = 200;
 // Raw output is bounded in memory and never returned: arbitrary logs cannot be safely redacted.
-export function runCheck(check, cwd, signal) {
+// env: extra variables for this check only (PEOS_UI_DIR for a ui-capture check).
+export function runCheck(check, cwd, signal, env = null) {
   const started = performance.now();
   return new Promise(resolve => {
     let child, timer, escalation, cleanupDeadline, stopReason, spawnError, exited = false, finished = false;
@@ -59,7 +60,7 @@ export function runCheck(check, cwd, signal) {
     function cancel() { stop(`Interrupted by ${signal.reason || 'cancellation'}.`); }
     if (signal?.aborted) { stopReason = `Interrupted by ${signal.reason}.`; finish(); return; }
     try {
-      child = spawn(check.executable, check.args, { cwd, shell: false, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+      child = spawn(check.executable, check.args, { cwd, shell: false, detached: true, stdio: ['ignore', 'pipe', 'pipe'], ...(env ? { env: { ...process.env, ...env } } : {}) });
     } catch {
       spawnError = 'Process startup failed.'; finish(); return;
     }

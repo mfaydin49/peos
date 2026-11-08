@@ -24,7 +24,7 @@ judge. Design: ${CLAUDE_PLUGIN_ROOT}/docs/design/peos-next.md.
   not look for another way.
 - Spawn only `peos:profiler`, `peos:investigator`, `peos:spec-writer`, `peos:architect`,
   `peos:designer`, `peos:planner`, `peos:implementer`, `peos:eval-spec`, `peos:eval-plan`,
-  `peos:eval-code`, `peos:eval-security`. Collect every result before you end your turn;
+  `peos:eval-code`, `peos:eval-security`, `peos:eval-ui`. Collect every result before you end your turn;
   if the host runs an agent in the background, wait for its hand-back silently. A spawn
   that fails because a `peos:*` agent is not found, or an agent missing a tool its
   definition names, means this session loaded an older plugin: stop and tell the user
@@ -102,7 +102,7 @@ Call `peos-run next --run <run>` and act on its `do`; repeat until an action end
 | `do` | You |
 | --- | --- |
 | `spawn` | Spawn every agent in `agents` together, each with its `model` when given, giving it each entry of `inputs` as one line (`name: value`) and nothing else from this conversation, except: the user's answers or `/peos:revise` feedback when `inputs.revision` asks for them. Then do what `then` says. |
-| `run` | Run that `peos-run` action with its `args` and a Bash timeout of `timeoutMs`, then call `next`. |
+| `run` | Run that `peos-run` action with its `args` and a Bash timeout of `timeoutMs`, then call `next`. A `PREVIEW` error stops the run: tell the user the local preview did not start and why. |
 | `write` | Write `artifact` from `template` and `sources` as `message` says, then call `next`. For `summary.md`, read the code evaluation reports in `sources.evaluations` with the Read tool for the acceptance evidence. |
 | `gate` | Show the producers' summary lines (at most about eight lines) and the artifact paths (a design preview as a clickable link), then end the turn with `message`. |
 | `limit` | Show the `blocking` findings in short and `message`; end the turn. |

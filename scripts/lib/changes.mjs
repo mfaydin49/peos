@@ -162,6 +162,7 @@ export async function codeChanges(project, base) {
     sections.push({ path: file.path, text: `--- /dev/null\n+++ b/${header(file.path)} (${file.note})\n${await fullContent(project, file.path)}\n` });
   }
   const securityTriggers = triggersOf(files, sections);
+  const uiTriggers = uiTriggersOf(sections);
   const { diff, truncated, bytes } = render(sections);
   // Existing tests changed, retyped or removed since the base: refactors must justify each
   // one. A test moved without content changes (rename score 100) is not listed.
@@ -172,7 +173,7 @@ export async function codeChanges(project, base) {
     if (status.startsWith('R') || status.startsWith('C')) { if (status === 'R100') pureMoves.add(renamed[i]); i += 2; } else i += 1;
   }
   const modifiedTests = files.filter(file => ['M', 'D', 'T', 'H'].includes(file.status) && testPath.test(file.path) && !pureMoves.has(file.path)).map(file => file.path);
-  return { files, securityTriggers, modifiedTests, floorFlags: floorFlags(sections, files, pureMoves), shortcuts: shortcutMarkers(sections), diff, truncated, bytes };
+  return { files, securityTriggers, uiTriggers, modifiedTests, floorFlags: floorFlags(sections, files, pureMoves), shortcuts: shortcutMarkers(sections), diff, truncated, bytes };
 }
 
 // Security triggers from changed paths and the lines added outside tests.
@@ -185,6 +186,33 @@ function triggersOf(files, sections) {
   const added = sections.filter(section => !testPath.test(section.path))
     .map(section => section.text.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n')).join('\n');
   for (const [name, pattern] of Object.entries(contentTriggers)) if (pattern.test(added)) triggers.add(name);
+  return [...triggers].sort();
+}
+// eval-ui.md §4 UI triggers: what the user sees changed, from paths and the lines added
+// outside tests. A component file triggers markup only when its added lines hold markup,
+// so a hook or helper in a .tsx file does not.
+const uiPaths = {
+  markup: /\.(?:html?|vue|svelte|astro|hbs|handlebars|ejs|erb|jinja2?|j2|njk|liquid|cshtml|razor)$/i,
+  style: /\.(?:css|scss|sass|less|styl)$|(?:^|\/)(?:tailwind|theme|tokens?)[^/]*\.(?:js|cjs|mjs|ts|json)$|(?:^|\/)(?:theme|tokens?|design-tokens)\//i,
+  'native-ui': /\.(?:storyboard|xib)$|(?:^|\/)res\/(?:layout|values|drawable|menu|navigation)[^/]*\/[^/]+\.xml$|\.xcassets\//i,
+  assets: /\.(?:png|jpe?g|gif|webp|avif|svg|ico|ttf|otf|woff2?|lottie)$/i,
+  copy: /\.(?:strings|stringsdict|xcstrings|arb|po)$|(?:^|\/)strings\.xml$|(?:^|\/)(?:locales?|i18n|l10n|translations)\//i
+};
+const componentFile = /\.(?:jsx|tsx)$/i;
+// A tag, not a type argument: `<ul` after a space or bracket, never `useState<Item>(` or `Array<string>`.
+const markupLine = /(?:^|[^\w$.\]])<\/?[A-Za-z][\w.:-]*(?:\s|\/?>|$)|\bclassName=|\bstyle=\{/;
+const nativeFile = /\.(?:swift|kt|dart)$/i;
+const nativeLine = /:\s*(?:some\s+)?View\b|\bUI(?:View|ViewController|Label|Button|StackView|Color|Font)\b|@Composable|\bModifier\.|\bWidget\s+build\(|\bColor\(|\bFont\.|\.(?:padding|foregroundStyle|foregroundColor|background|font|frame)\(/;
+export function uiTriggersOf(sections) {
+  const triggers = new Set();
+  for (const { path, text } of sections) {
+    if (testPath.test(path) || prose.test(path)) continue;
+    for (const [name, pattern] of Object.entries(uiPaths)) if (pattern.test(path)) triggers.add(name);
+    if (!componentFile.test(path) && !nativeFile.test(path)) continue;
+    const added = text.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).map(line => line.slice(1));
+    if (componentFile.test(path) && added.some(line => markupLine.test(line))) triggers.add('markup');
+    if (nativeFile.test(path) && added.some(line => nativeLine.test(line))) triggers.add('native-ui');
+  }
   return [...triggers].sort();
 }
 // The diff evaluators read. Generated files and very large sections are listed with their
@@ -214,5 +242,5 @@ export function treeChanges(project, from, to) {
   const sections = git(project, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', from, to, '--', '.', exclude])
     .split(/^(?=diff --git )/m).filter(Boolean).map(text => ({ path: sectionPath(text), text }));
   const { diff, truncated, bytes } = render(sections);
-  return { files, securityTriggers: triggersOf(files, sections), diff, truncated, bytes };
+  return { files, securityTriggers: triggersOf(files, sections), uiTriggers: uiTriggersOf(sections), diff, truncated, bytes };
 }

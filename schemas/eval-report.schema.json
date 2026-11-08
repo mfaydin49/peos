@@ -2,13 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/personal-engineering-os/eval-report.schema.json",
   "title": "Personal Engineering OS evaluator report",
-  "$comment": "Returned by an evaluator agent as its final message and persisted by the orchestrator. Spec and plan evaluations judge an artifact (sha256); code, security and performance evaluations judge a code state (fp).",
+  "$comment": "Returned by an evaluator agent as its final message and persisted by the orchestrator. Spec and plan evaluations judge an artifact (sha256); code, security, ui and performance evaluations judge a code state (fp).",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "evaluator", "verdict", "mode", "subject", "criteria", "findings", "notAssessed"],
   "properties": {
     "schemaVersion": { "type": "integer", "const": 1 },
-    "evaluator": { "enum": ["spec", "plan", "code", "security", "performance"] },
+    "evaluator": { "enum": ["spec", "plan", "code", "security", "ui", "performance"] },
     "focus": { "enum": ["architecture", "design", "acceptance", "quality", "tests", "all"] },
     "verdict": { "enum": ["PASS", "FAIL", "BLOCKED"] },
     "mode": { "enum": ["full", "degraded"] },
@@ -65,7 +65,7 @@
       "then": { "properties": { "focus": { "enum": ["architecture", "design"] } } }
     },
     {
-      "if": { "properties": { "evaluator": { "enum": ["spec", "security", "performance"] } } },
+      "if": { "properties": { "evaluator": { "enum": ["spec", "security", "ui", "performance"] } } },
       "then": { "not": { "properties": { "focus": true }, "required": ["focus"] } }
     },
     {

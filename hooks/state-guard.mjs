@@ -7,12 +7,15 @@
 //   artifact, an evaluator its report, the profiler the profile and missing instruction
 //   files), so the orchestrator never copies their content; the implementer may change
 //   project code but not .project-os or run peos-run.
+// - MCP tools: no PEOS agent uses them, except the UI evaluator with browser tools on the
+//   origin of a preview peos-run started for an active run (eval-ui.md §7).
 // Shell inspection is a heuristic, not a sandbox: indirection (a script that builds the
 // path itself) can evade it, which is why decisions also need a user-created grant.
 import { lstat, realpath } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readInput, projectRoot, emit } from './common.mjs';
+import { readInput, projectRoot, emit, activeRuns } from './common.mjs';
+import { runningPreview } from '../scripts/lib/ui.mjs';
 
 const peosRun = fileURLToPath(new URL('../scripts/peos-run.mjs', import.meta.url));
 const writableArtifacts = ['task.md', 'idea.md', 'investigation.md', 'spec.md', 'architecture.md', 'design.md', 'design-preview.html', 'plan.md', 'summary.md', 'pending-eval.json'];
@@ -64,6 +67,66 @@ async function writeAllowed(project, path) {
   const current = await lstat(path).catch(() => null);
   return !current?.isSymbolicLink();
 }
+// The UI evaluator looks at the run's own preview. Only the isolated browsers (the
+// desktop app's built-in pane, Playwright), never the user's own Chrome; only tools that
+// look, navigate or click (an allow-list, applied to every action of a batch); and every
+// URL argument on the host and port of a preview an active run started and still runs.
+const browserServer = /^mcp__((?:(?!__).)*(?:browser|playwright)(?:(?!__).)*)__/i;
+const lookingTools = new Set(['navigate', 'navigate_back', 'navigate_forward', 'computer', 'screenshot', 'take_screenshot', 'snapshot', 'read_page',
+  'get_page_text', 'find', 'resize', 'resize_window', 'tabs', 'tabs_context', 'tabs_create', 'tabs_select', 'click', 'hover', 'press_key',
+  'wait_for', 'console_messages', 'read_console_messages', 'batch']);
+// computer actions that only look, scroll, point or press keys; never typing text.
+const lookingActions = new Set(['screenshot', 'zoom', 'scroll', 'scroll_to', 'wait', 'hover', 'left_click', 'double_click', 'key']);
+const scheme = /^(?:[a-z][a-z0-9+.-]*:\/\/|(?:about|data|javascript|blob|file|view-source):)/i;
+function urlArguments(value, key = '', found = []) {
+  if (typeof value === 'string') {
+    if (scheme.test(value) || /^(?:url|uri|href|link)$/i.test(key)) found.push(value);
+  } else if (Array.isArray(value)) for (const item of value) urlArguments(item, key, found);
+  else if (value && typeof value === 'object') for (const [name, item] of Object.entries(value)) urlArguments(item, name, found);
+  return found;
+}
+const toolName = name => String(name).replace(browserServer, '').replace(/^browser_/, '').replace(/_mcp$/, '');
+// A refusal for one tool call or, for a batch, any call inside it.
+function refusedTool(name, input) {
+  const base = toolName(name);
+  if (!lookingTools.has(base)) return `${base} is not a tool that only looks`;
+  if (base === 'computer' && !lookingActions.has(String(input?.action))) return `computer ${input?.action} is not an action that only looks`;
+  if (base === 'batch') {
+    const actions = Array.isArray(input?.actions) ? input.actions : null;
+    if (!actions) return 'a batch without an action list';
+    for (const action of actions) {
+      const reason = action && typeof action === 'object' && action.name !== undefined ? refusedTool(action.name, action.input) : 'a batch action without a name';
+      if (reason) return reason;
+    }
+  }
+  return null;
+}
+async function previewOrigins(project) {
+  const origins = [];
+  for (const { directory } of await activeRuns(project)) {
+    const preview = await runningPreview(directory).catch(() => null);
+    try { if (preview?.url) origins.push(new URL(preview.url).host); } catch { /* no usable preview */ }
+  }
+  return origins;
+}
+async function uiToolRefusal(project, tool, args) {
+  if (!browserServer.test(tool)) return 'The UI evaluator uses only an isolated browser (the built-in browser pane or Playwright), never the user\'s Chrome.';
+  const refused = refusedTool(tool, args);
+  if (refused) return `The UI evaluator only looks and clicks: ${refused}.`;
+  const urls = urlArguments(args).filter(value => !['back', 'forward'].includes(value));
+  if (!urls.length) return null;
+  const origins = project ? await previewOrigins(project) : [];
+  for (const value of urls) {
+    // Hosts are compared with their port; a URL without a scheme is one the browser completes.
+    let host;
+    try {
+      const url = new URL(scheme.test(value) ? value : `http://${value}`);
+      host = ['http:', 'https:'].includes(url.protocol) ? url.host : null;
+    } catch { host = null; }
+    if (!host || !origins.includes(host)) return `The UI evaluator may open only the run's preview (${origins.join(', ') || 'none running'}).`;
+  }
+  return null;
+}
 // Text that a shell would execute or expand: anything outside single quotes, since
 // double quotes still run $(…), backticks and variable expansion.
 function expandable(command) {
@@ -105,7 +168,11 @@ if (!input) {
   const args = input.tool_input ?? {};
   const project = await projectRoot(input);
   const implementer = input.agent_type === 'peos:implementer';
-  if (typeof input.agent_type === 'string' && peosAgents.test(input.agent_type) && [...writeTools, 'Bash'].includes(tool)) {
+  const agent = typeof input.agent_type === 'string' && peosAgents.test(input.agent_type) ? input.agent_type : null;
+  if (typeof tool === 'string' && tool.startsWith('mcp__')) {
+    if (agent && agent !== 'peos:eval-ui') deny('PEOS agents other than the UI evaluator use no MCP tools.');
+    else if (agent) { const reason = await uiToolRefusal(project, tool, args); if (reason) deny(reason); }
+  } else if (typeof input.agent_type === 'string' && peosAgents.test(input.agent_type) && [...writeTools, 'Bash'].includes(tool)) {
     const target = tool === 'Write' && project ? String(args.file_path ?? '') : '';
     const path = target ? await canonical(isAbsolute(target) ? target : resolve(input.cwd ?? project, target)) : null;
     if (!path || !(await agentWriteAllowed(project, input.agent_type, path))) {

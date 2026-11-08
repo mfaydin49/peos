@@ -11,6 +11,7 @@ import { digest, signature } from './eval-report.mjs';
 import { headCommit } from './git.mjs';
 import { codeMapPath } from './map.mjs';
 import { designRequested, gateArtifacts, gateEvalKeys, gateOrder, readRunFile } from './run-state.mjs';
+import { runningPreview } from './ui.mjs';
 
 const toolkit = fileURLToPath(new URL('../../', import.meta.url));
 const template = name => resolve(toolkit, 'templates/run', name);
@@ -247,11 +248,15 @@ async function decide(project, context, { options, errors, h }) {
       return outcome.applied ? { applied: 'code changed after release: checks again' } : outcome;
     }
     if (!await exists(path('summary.md'))) {
-      const { shortcuts, floorFlags } = await h.changes(project, { run });
+      const { shortcuts, floorFlags, uiTriggers } = await h.changes(project, { run });
+      const capture = (await readJson(directory, 'checks.json'))?.ui;
+      // A changed interface nobody looked at is said plainly (eval-ui.md §5.3).
+      const ui = state.evals.ui ? { evaluation: path('evals/ui.json'), ...(capture?.status === 'captured' ? { screenshots: capture.manifest } : {}) }
+        : uiTriggers?.length ? { 'not verified': uiNotVerified(config, capture), triggers: uiTriggers } : undefined;
       return { do: 'write', artifact: path('summary.md'), template: template('summary.md'),
-        sources: { evaluations: path('evals'), checks: path('checks.json'), shortcuts, floorFlags,
+        sources: { evaluations: path('evals'), checks: path('checks.json'), shortcuts, floorFlags, ui,
           carried: Object.entries(state.evals).filter(([, evaluation]) => evaluation.carried).map(([key]) => key) },
-        message: 'Write summary.md: what changed, acceptance evidence from the code evaluation criteria, checks, evaluations with rounds and remaining non-blocking findings (name each carried evaluation as carried over a change that needed no evaluator), shortcuts and accepted floor flags, what was not verified. Readiness: "Not assessed: release check arrives in increment 6".' };
+        message: `Write summary.md: what changed, acceptance evidence from the code evaluation criteria, checks, evaluations with rounds and remaining non-blocking findings (name each carried evaluation as carried over a change that needed no evaluator), ${ui ? (ui.evaluation ? 'the user interface observed (screens, states, viewports, with relative links to the screenshots when there are any), ' : 'the user interface as not verified, first under Not verified, with its reason and fix, ') : ''}shortcuts and accepted floor flags, what was not verified. Readiness: "Not assessed: release check arrives in increment 6".` };
     }
     return { do: 'finished', summary: path('summary.md') };
   }
@@ -327,7 +332,13 @@ async function decide(project, context, { options, errors, h }) {
   const change = await h.changes(project, { run });
   const codeKeys = Object.keys(state.evals).filter(key => !Object.values(gateEvalKeys).includes(key));
   const required = state.tier === 'large' ? ['code-acceptance', 'code-quality', 'code-tests'] : ['code-all'];
-  const keys = [...new Set([...required, ...(change.securityTriggers.length || state.evals.security || state.evalBases?.security ? ['security'] : []), ...codeKeys])];
+  // The interface is evaluated when the change touches it and something can show it:
+  // screenshots from a ui-capture check, or the configured local preview (eval-ui.md §4–5).
+  const capture = (await readJson(directory, 'checks.json'))?.ui;
+  const screenshots = capture?.status === 'captured' ? capture : null;
+  const uiSource = screenshots ? 'capture' : config?.preview ? 'preview' : null;
+  const ui = state.evals.ui || ((change.uiTriggers.length || state.evalBases?.ui) && uiSource) ? ['ui'] : [];
+  const keys = [...new Set([...required, ...(change.securityTriggers.length || state.evals.security || state.evalBases?.security ? ['security'] : []), ...ui, ...codeKeys])];
   const evaluations = keys.map(key => ({ key, evaluation: assessment.evals[key] }));
   for (const { key, evaluation } of evaluations.filter(({ evaluation }) => evaluation)) {
     const stop = await limit(directory, key, evaluation, { fresh: evaluation.fresh });
@@ -343,6 +354,14 @@ async function decide(project, context, { options, errors, h }) {
   const evidenceRound = Boolean(options['evidence-round']) && failing.length > 0;
   const spawn = evaluations.filter(({ key, evaluation }) => (!evaluation && (evidenceRound || !failing.some(entry => entry.key === key))) || (evaluation && !evaluation.fresh) || (evidenceRound && evaluation?.verdict === 'FAIL'));
   const covered = scope ? [...new Set(scope.flatMap(milestone => milestone.steps.flatMap(id => plan.covers[id] ?? [])))] : null;
+  let live = null;
+  if (spawn.some(({ key }) => key === 'ui')) {
+    if (!uiSource) return { do: 'stop', code: 'UI', message: `The interface was evaluated earlier, but nothing can show it now: ${uiNotVerified(config, capture)}.` };
+    // The preview is started by peos-run, which runs only the configured command.
+    if (uiSource === 'preview' && !(live = await runningPreview(directory))) {
+      return { do: 'run', command: 'preview-start', args: ['--run', run], timeoutMs: config.preview.timeoutMs + 30000, message: 'Starts the local preview the UI evaluator looks at.' };
+    }
+  }
   if (spawn.length) {
     // Delta evaluation (eval-economy.md): an evaluation with a snapshot judges only the
     // change since it; one kept as a base at a milestone boundary or plan re-approval does
@@ -380,6 +399,10 @@ async function decide(project, context, { options, errors, h }) {
         ...(resets[key]?.verdict === 'BLOCKED' ? { 'previously blocked': 'give the user\'s answer about what could not be assessed' } : {}),
         ...(errors[key] ? { 'previous report rejected': errors[key] } : {}) };
       if (key === 'security') agents.push({ agent: 'peos:eval-security', inputs: { ...shared, triggers: basis ? basis.securityTriggers : change.securityTriggers } });
+      else if (key === 'ui') agents.push({ agent: 'peos:eval-ui', inputs: { ...shared, plan: path(planFile), design, triggers: basis ? basis.uiTriggers : change.uiTriggers,
+        ...(screenshots ? { screenshots: screenshots.manifest }
+          : { preview: live.url, viewports: config.preview.viewports.map(({ name, width, height }) => `${name} ${width}x${height}`), 'color schemes': config.preview.colorSchemes }),
+        ...(covered && !final ? { milestone: current.id, 'criteria in scope': covered, scope: 'report criteria outside this list not_assessed: a later milestone covers them' } : {}) } });
       else if (key.startsWith('code-')) agents.push({ agent: 'peos:eval-code', ...(['trivial', 'small'].includes(state.tier) ? { model: 'sonnet' } : {}), inputs: { ...shared,
         focus: key.slice('code-'.length), plan: path(planFile), design, floorFlags: change.floorFlags, shortcuts: change.shortcuts,
         ...(state.type === 'refactor' ? { 'run type': 'refactor', modifiedTests: change.modifiedTests } : {}),
@@ -408,6 +431,13 @@ async function decide(project, context, { options, errors, h }) {
   try { await h.advance(project, { run, to: 'release' }); }
   catch (error) { if (error instanceof ToolkitError) return { do: 'stop', code: error.code, message: error.message }; throw error; }
   return { applied: 'stage release' };
+}
+
+// Why a changed interface has no UI evaluation, with the fix.
+function uiNotVerified(config, capture) {
+  if (capture && capture.status !== 'captured') return `the ui-capture check gave no usable screenshots (${capture.reason})`;
+  if (config?.checks.some(check => check.kind === 'ui-capture')) return 'the ui-capture check did not run with the current checks (it needs the task phase)';
+  return 'no ui-capture check or preview is configured; add one to .project-os/engineering.config.json (docs/design/eval-ui.md §5)';
 }
 
 // The third failed round, or the same blocking findings two rounds in a row, is the user's call.

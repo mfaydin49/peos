@@ -1,9 +1,12 @@
 import { main, parseArgs, projectDirectory, fail, requirePlatform } from './lib/cli.mjs';
 import { loadConfig, resolveReferences } from './lib/config.mjs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import { runCheck } from './lib/process.mjs';
 
 await main(async () => {
-  const options = parseArgs(process.argv.slice(2), ['project', 'phase', 'checks']);
+  const options = parseArgs(process.argv.slice(2), ['project', 'phase', 'checks', 'ui-dir']);
   requirePlatform();
   const project = await projectDirectory(options.project);
   if (!['task', 'release'].includes(options.phase)) fail('INVOCATION', '--phase must be task or release.');
@@ -24,15 +27,25 @@ await main(async () => {
   const onTerm = () => controller.abort('SIGTERM');
   process.on('SIGINT', onInt); process.on('SIGTERM', onTerm);
   const results = [];
+  // Outside a run, a ui-capture check still gets its own directory, never one inherited
+  // from the caller's environment; its screenshots are discarded.
+  const scratch = config.checks.some(check => check.kind === 'ui-capture') && !options['ui-dir'] ? await mkdtemp(resolve(tmpdir(), 'peos-ui-')) : null;
   try {
     for (const check of config.checks) {
       const inPhase = check.phases.includes(options.phase);
       if (!inPhase || !selected.includes(check.id)) {
         results.push({ id: check.id, required: check.required, kind: check.kind ?? null, status: 'SKIPPED', exitCode: null, durationMs: 0,
           reason: inPhase ? 'Intentionally omitted from targeted verification.' : 'Outside selected phase.' });
-      } else results.push({ kind: check.kind ?? null, ...await runCheck(check, project, controller.signal) });
+      } else {
+        // A ui-capture check writes its screenshots and manifest where PEOS reads them (eval-ui.md §5.2).
+        const env = check.kind === 'ui-capture' ? { PEOS_UI_DIR: options['ui-dir'] ?? scratch } : null;
+        results.push({ kind: check.kind ?? null, ...await runCheck(check, project, controller.signal, env) });
+      }
     }
-  } finally { process.off('SIGINT', onInt); process.off('SIGTERM', onTerm); }
+  } finally {
+    process.off('SIGINT', onInt); process.off('SIGTERM', onTerm);
+    if (scratch) await rm(scratch, { recursive: true, force: true });
+  }
   const failed = results.some(check => selected.includes(check.id) && check.required && check.status !== 'PASS');
   const interrupted = controller.signal.aborted;
   const verification = options.checks === undefined ? 'full' : 'partial';

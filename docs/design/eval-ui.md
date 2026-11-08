@@ -1,9 +1,8 @@
 # PEOS — UI evaluator (`eval-ui`) design
 
-- Status: Draft for review
+- Status: Implemented (increment 7e, 2026-11-08); see §14 for what differs from this draft
 - Date: 2026-11-03
-- Scope: design only; extends [peos-v2-plugin.md](peos-v2-plugin.md) §8–§11
-- Increment: proposed as 5m (web), with simulator/emulator support in increment 7
+- Scope: extends [peos-v2-plugin.md](peos-v2-plugin.md) §8–§11 and [design-gate.md](design-gate.md)
 
 ## 1. Problem
 
@@ -286,3 +285,34 @@ U1–U4 are tested on the fixture before any script work starts.
 - Should a `standard` run with UI criteria and no capture source stop and ask,
   instead of finishing with `uiNotVerified`?
 - Should accepted screenshots become a baseline for later runs, or stay per run?
+
+## 14. As implemented (increment 7e)
+
+- The spec's "User interface" section, the `eval-spec` rule and the profile's "Design
+  system" came with the design gate ([design-gate.md](design-gate.md)); `eval-ui` also
+  judges against `design.md` when the run has one.
+- `changes` and `delta` return `uiTriggers`. `next` adds the `ui` evaluation when the
+  change has a trigger (or a `ui` evaluation or base exists) and a source is available:
+  a `ui-capture` manifest recorded on the current checks, otherwise a configured
+  `preview`. A UI evaluation recorded earlier without a source now stops the run.
+- A `ui-capture` check gets `PEOS_UI_DIR` only through `record-checks` (`verify
+  --ui-dir`), which empties `<run>/ui/` first and validates the manifest afterwards:
+  image files directly inside the directory, at most 60 shots, `a11y` impacts from
+  axe's scale. A passing capture with an invalid manifest is recorded as FAIL.
+- The preview is driven by `peos-run preview-start` and `preview-stop` (`do: run` from
+  `next` before `eval-ui` is spawned); `advance` to `release`, `done` or `stopped` stops
+  it. `setup` does not propose a `preview` block yet; the user adds it.
+- `uiNotVerified` is not stored in state: the summary action computes it from the
+  configuration and `checks.json` and passes it as `sources.ui`.
+- `peos:eval-ui` has no `tools` list (assumption U1 is not verified): it inherits the
+  host's tools, with editing, shell and web tools denied by name. state-guard checks
+  every `mcp__` call: other PEOS agents get none (the implementer keeps them). `eval-ui`
+  gets only isolated browsers (`browser` or `playwright` in the server name; never
+  Claude in Chrome, which acts in the user's signed-in tabs), only an allow-list of
+  tools that look, navigate or click (also inside a batch; no typing), and every URL
+  argument on the host and port of a preview an active run started and still runs.
+- The preview's process group is what counts: a launcher that starts the server and
+  exits is fine while its group lives, and a group whose leader has another start time
+  than recorded (a reused ID) is never signalled.
+- Still open: U1–U3 on a real host, a model run on the seeded fixture (§12 c, d), and
+  §12 e (simulator and emulator previews; iOS and Android use `ui-capture` meanwhile).

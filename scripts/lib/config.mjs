@@ -16,7 +16,10 @@ export const approvals = [
   'unplanned-database'
 ];
 // Lets gates ask mechanically whether, e.g., a security check ran on a code state.
-export const checkKinds = ['test', 'lint', 'typecheck', 'build', 'security', 'performance', 'coverage', 'mutation', 'other'];
+export const checkKinds = ['test', 'lint', 'typecheck', 'build', 'security', 'performance', 'coverage', 'mutation', 'ui-capture', 'other'];
+// A preview is a project-owned local server: loopback origins only (eval-ui.md §5.1).
+export const loopbackOrigin = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|[a-z0-9-]+\.localhost)(?::[0-9]{1,5})?\/?$/;
+export const defaultViewports = [{ name: 'mobile', width: 390, height: 844 }, { name: 'desktop', width: 1280, height: 800 }];
 // Portable slash-separated paths, contained lexically within the target project.
 export const referencePattern = '^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\:\\u0000-\\u001f]+$';
 const pathPattern = new RegExp(referencePattern);
@@ -38,7 +41,7 @@ function array(value, where, { nonempty = false, allowed } = {}) {
   }
 }
 export function validateConfig(input) {
-  object(input, ['schemaVersion', 'projectName', 'outputLanguage', 'references', 'checks', 'manualChecks', 'approvalRequiredFor'], ['schemaVersion', 'projectName', 'checks'], 'config');
+  object(input, ['schemaVersion', 'projectName', 'outputLanguage', 'references', 'preview', 'checks', 'manualChecks', 'approvalRequiredFor'], ['schemaVersion', 'projectName', 'checks'], 'config');
   if (input.schemaVersion !== 1) invalid('schemaVersion', 'expected integer 1');
   string(input.projectName, 'projectName');
   const config = structuredClone(input);
@@ -75,9 +78,29 @@ export function validateConfig(input) {
       } else string(entry.description, `${where}.description`);
     }
   }
+  if (Object.hasOwn(input, 'preview')) config.preview = validatePreview(config.preview);
   config.approvalRequiredFor = Object.hasOwn(input, 'approvalRequiredFor') ? config.approvalRequiredFor : [...approvals];
   array(config.approvalRequiredFor, 'approvalRequiredFor', { allowed: approvals });
   return config;
+}
+function validatePreview(preview) {
+  object(preview, ['executable', 'args', 'url', 'readyPath', 'timeoutMs', 'viewports', 'colorSchemes'], ['executable', 'args', 'url', 'timeoutMs'], 'preview');
+  string(preview.executable, 'preview.executable');
+  if (preview.executable.includes('\0')) invalid('preview', 'executable must not contain NUL');
+  if (!Array.isArray(preview.args) || preview.args.some(arg => typeof arg !== 'string' || arg.includes('\0'))) invalid('preview', 'args must be strings without NUL');
+  if (typeof preview.url !== 'string' || !loopbackOrigin.test(preview.url)) invalid('preview.url', 'expected a loopback origin (localhost, 127.0.0.1, [::1] or *.localhost) without a path');
+  if (Object.hasOwn(preview, 'readyPath') && (typeof preview.readyPath !== 'string' || !/^\/\S*$/.test(preview.readyPath))) invalid('preview.readyPath', 'expected a path starting with /');
+  if (!Number.isSafeInteger(preview.timeoutMs) || preview.timeoutMs <= 0 || preview.timeoutMs > 600000) invalid('preview', 'timeoutMs must be an integer from 1 to 600000');
+  if (Object.hasOwn(preview, 'viewports')) {
+    if (!Array.isArray(preview.viewports) || !preview.viewports.length || preview.viewports.length > 4) invalid('preview.viewports', 'expected one to four viewports');
+    for (const [index, viewport] of preview.viewports.entries()) {
+      object(viewport, ['name', 'width', 'height'], ['name', 'width', 'height'], `preview.viewports[${index}]`);
+      string(viewport.name, `preview.viewports[${index}].name`);
+      for (const side of ['width', 'height']) if (!Number.isSafeInteger(viewport[side]) || viewport[side] < 240 || viewport[side] > 3840) invalid(`preview.viewports[${index}].${side}`, 'expected an integer from 240 to 3840');
+    }
+  }
+  if (Object.hasOwn(preview, 'colorSchemes')) array(preview.colorSchemes, 'preview.colorSchemes', { nonempty: true, allowed: ['light', 'dark'] });
+  return { readyPath: '/', viewports: defaultViewports, colorSchemes: ['light', 'dark'], ...preview, url: preview.url.replace(/\/$/, '') };
 }
 export async function loadConfig(project) {
   let source;

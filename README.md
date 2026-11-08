@@ -9,10 +9,10 @@ Projects retain their architecture, technology, design system, domain policy,
 check commands, budgets, approvals, task records and decisions. The toolkit supplies
 routing, four focused stage skills, rule documents, project and run templates, schemas,
 and four local scripts. It is also a Claude Code plugin preview (below) with entry
-skills, eleven agents (project profile, investigation, spec, architecture, design, plan, implementation and four evaluators) and hooks that
+skills, twelve agents (project profile, investigation, spec, architecture, design, plan, implementation and five evaluators) and hooks that
 protect run state and human gate decisions. The direction is specified in the [v2 design](docs/design/peos-v2-plugin.md);
-increments 1–5 and 7a–7d are implemented: request → spec → (architecture) → (design) → plan → implementation →
-checks → independent code and security evaluation → release stage, for every tier from a
+increments 1–5 and 7a–7e are implemented: request → spec → (architecture) → (design) → plan → implementation →
+checks → independent code, security and UI evaluation → release stage, for every tier from a
 one-line fix to a new application built milestone by milestone, with extra
 behavior-preservation rules for refactor runs and deterministic quality guardrails
 (floor guard, shortcut markers, code map). `/peos:init` (also run automatically by
@@ -106,6 +106,14 @@ A spec that introduces new screens says `Design: new` under "User interface"; th
 then gets a design ([design](docs/design/design-gate.md)): tokens, components, every
 screen with its states, and `design-preview.html` to open in a browser before any code
 is written. The implementer builds the screens from those tokens.
+
+A change that touches the interface (markup, styles, native views, assets, strings) is
+also judged on screen by `eval-ui` ([design](docs/design/eval-ui.md)), from one of two
+sources in `.project-os/engineering.config.json`: a check of kind `ui-capture` (your
+UI test writes screenshots and a `manifest.json` into `$PEOS_UI_DIR`; the way for iOS
+and Android) or a `preview` (a local dev server on a loopback URL that `peos-run`
+starts, which `eval-ui` opens with the host's browser tools). Without either, the
+summary says plainly that the interface was not verified.
 
 The run's control flow is in `peos-run next` ([design](docs/design/peos-next.md)): it
 decides the next agent, check or gate from the recorded state, so the orchestrator only

@@ -11,7 +11,7 @@ in the run directory); if that file already exists, Read it first, then overwrit
 Your final message is one line: `<verdict> <report path>`.
 
 ```json
-{ "schemaVersion": 1, "evaluator": "spec|plan|code|security", "focus": "code: the focus given; otherwise omit",
+{ "schemaVersion": 1, "evaluator": "spec|plan|code|security|ui", "focus": "code: the focus given; otherwise omit",
   "verdict": "PASS|FAIL|BLOCKED", "mode": "full|degraded", "subject": "copied",
   "criteria": [{ "id": "AC-1", "status": "met|not_met|not_assessed", "evidence": "…" }],
   "findings": [{ "id": "F1", "severity": "critical|high|medium|low", "file": "src/a.ts", "line": 1, "problem": "…", "impact": "…", "fix": "…" }],

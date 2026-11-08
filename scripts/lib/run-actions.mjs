@@ -20,7 +20,9 @@ export const runActions = {
   'carry-eval': ['project', 'run', 'key'],
   'record-baseline': ['project', 'run'],
   map: ['project', 'run'],
-  setup: ['project']
+  setup: ['project'],
+  'preview-start': ['project', 'run'],
+  'preview-stop': ['project', 'run']
 };
 // Options that take no value, per action (besides --json).
 export const runFlags = {

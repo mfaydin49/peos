@@ -8,6 +8,8 @@ import { runActions, runFlags } from './lib/run-actions.mjs';
 import { next, planDigest } from './lib/next.mjs';
 import { consumeGrant, insideClaudeCode, writeGrant } from './lib/grants.mjs';
 import { codeChanges, treeChanges } from './lib/changes.mjs';
+import { loadConfig } from './lib/config.mjs';
+import { readManifest, startPreview, stopPreview } from './lib/ui.mjs';
 import { snapshotTree, treeExists } from './lib/snapshot.mjs';
 import { codeMap } from './lib/map.mjs';
 import { emptyProject, setupProject } from './lib/setup.mjs';
@@ -105,7 +107,7 @@ async function init(project, options) {
   try { await mkdir(directory); }
   catch (error) { if (error.code === 'EEXIST') fail('RUN_EXISTS', 'A run with this name already exists today.'); throw error; }
   // Evidence and state are working files; committed artifacts are the Markdown documents.
-  await writeFile(resolve(directory, '.gitignore'), 'state.json\nstate.lock\nchecks.json\nbaseline-checks.json\nchanges.diff\ndelta-*.diff\nmap.md\nevals/\npending-eval.json\npending-eval-*.json\nrejected-eval-*.json\n.stop-block\nusage.json\n*.tmp-*\n');
+  await writeFile(resolve(directory, '.gitignore'), 'state.json\nstate.lock\nchecks.json\nbaseline-checks.json\nchanges.diff\ndelta-*.diff\nmap.md\nevals/\npending-eval.json\npending-eval-*.json\nrejected-eval-*.json\n.stop-block\nusage.json\npreview.json\nui/\n*.tmp-*\n');
   const now = new Date().toISOString();
   const state = { schemaVersion: 1, run, type, tier, stage: 'intake',
     gates: Object.fromEntries(tierGates[tier].map(gate => [gate, { status: 'pending' }])),
@@ -151,7 +153,7 @@ async function recordChecks(project, options) {
   const directory = await runDirectory(project, options.run);
   await readState(directory);
   choice(options.phase, ['task', 'release'], 'phase');
-  const { checks, exitCode } = await runChecks(project, options.phase, options.checks);
+  const { checks, exitCode } = await runChecks(project, options.phase, options.checks, directory);
   await writeJsonAtomic(resolve(directory, 'checks.json'), checks);
   return { report: { run: options.run, checks }, exitCode };
 }
@@ -170,19 +172,50 @@ async function recordBaseline(project, options) {
   await writeJsonAtomic(resolve(directory, 'baseline-checks.json'), baseline);
   return { report: { run: state.run, baseline }, exitCode };
 }
-async function runChecks(project, phase, selection) {
+// Runs created before a file existed have no ignore line for it; screenshots and the
+// preview record are working files, never committed.
+async function ignoreInRun(directory, entry) {
+  const path = resolve(directory, '.gitignore');
+  const current = await readFile(path, 'utf8').catch(() => '');
+  if (!current.split('\n').includes(entry)) await writeAtomic(path, `${current}${current && !current.endsWith('\n') ? '\n' : ''}${entry}\n`);
+}
+// With a run directory, a ui-capture check that runs writes into a fresh <run>/ui/ and its
+// manifest is validated: a capture that passes without usable screenshots fails
+// (eval-ui.md §5.2). Checks that run no capture leave the directory alone.
+async function runChecks(project, phase, selection, directory = null) {
   const before = await fingerprint(project);
-  const args = [verifyScript, '--project', project, '--phase', phase, ...(selection === undefined ? [] : ['--checks', selection]), '--json'];
+  let uiDir = null;
+  if (directory) {
+    let selected = null;
+    try { selected = selection === undefined ? null : JSON.parse(selection); } catch { selected = []; }
+    const config = await loadConfig(project);
+    if (config.checks.some(check => check.kind === 'ui-capture' && check.phases.includes(phase) && (!selected || (Array.isArray(selected) && selected.includes(check.id))))) {
+      await rm(resolve(directory, 'ui'), { recursive: true, force: true });
+      uiDir = await runSubdirectory(directory, 'ui');
+      await ignoreInRun(directory, 'ui/');
+    }
+  }
+  const args = [verifyScript, '--project', project, '--phase', phase, ...(selection === undefined ? [] : ['--checks', selection]), ...(uiDir ? ['--ui-dir', uiDir] : []), '--json'];
   const result = spawnSync(process.execPath, args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
   let report;
   try { report = JSON.parse(result.stdout); } catch { fail('VERIFY', 'The verifier returned no structured report.'); }
   if (report.status === 'ERROR') fail(report.error.code, report.error.message);
+  let status = result.status ?? 1;
+  const captures = report.checks.filter(check => check.kind === 'ui-capture' && check.status !== 'SKIPPED');
+  if (uiDir && captures.length) {
+    report.ui = captures.some(check => check.status === 'PASS') ? await readManifest(uiDir) : { status: 'failed', reason: 'The ui-capture check did not pass.' };
+    if (report.ui.status !== 'captured') {
+      for (const check of captures.filter(check => check.status === 'PASS')) Object.assign(check, { status: 'FAIL', reason: `Exited with code 0, but ${report.ui.reason}` });
+      // verify's rule: a failed required check makes the run FAIL unless it was interrupted.
+      if (!report.interrupted && captures.some(check => check.required && check.status === 'FAIL')) { report.status = 'FAIL'; status = 1; }
+    }
+  }
   const after = await fingerprint(project);
   // Evidence is bound to a code state only if nothing changed while checks ran.
   const stable = before.codeState === after.codeState;
   const checks = { ...report, codeState: stable ? after.codeState : null, configHash: await configHash(project),
     ...(stable ? {} : { codeStateNote: 'Code changed while checks ran; this result is not bound to a code state.' }) };
-  return { checks, exitCode: result.status ?? 1 };
+  return { checks, exitCode: status };
 }
 const reportLimit = 1024 * 1024;
 async function readStdin() {
@@ -406,13 +439,13 @@ async function changes(project, options) {
   const state = await readState(directory);
   if (!state.baseHead) fail('TRANSITION', 'The run has not entered implementation yet.');
   const before = await fingerprint(project);
-  const { files, securityTriggers, modifiedTests, floorFlags, shortcuts, diff, truncated, bytes } = await codeChanges(project, state.baseHead);
+  const { files, securityTriggers, uiTriggers, modifiedTests, floorFlags, shortcuts, diff, truncated, bytes } = await codeChanges(project, state.baseHead);
   const { codeState } = await fingerprint(project);
   // The diff must describe exactly the code state evaluators will certify.
   if (codeState !== before.codeState) fail('UNSTABLE', 'The code changed while the diff was computed; run changes again.');
   const diffPath = resolve(directory, 'changes.diff');
   await writeAtomic(diffPath, diff);
-  return { run: state.run, base: state.baseHead, codeState, files, securityTriggers, modifiedTests, floorFlags, shortcuts, diffPath, truncated, diffBytes: bytes };
+  return { run: state.run, base: state.baseHead, codeState, files, securityTriggers, uiTriggers, modifiedTests, floorFlags, shortcuts, diffPath, truncated, diffBytes: bytes };
 }
 // Delta evaluation input: the change from an evaluation's snapshot to the current code.
 // tree: null when Git no longer has the snapshot (the evaluation is then a full one).
@@ -429,7 +462,7 @@ async function delta(project, options) {
   const deltaPath = resolve(directory, `delta-${options.since.slice(0, 12)}.diff`);
   await writeAtomic(deltaPath, change.diff);
   return { run: state.run, since: options.since, tree, codeState: before.codeState, deltaPath, bytes: change.bytes, truncated: change.truncated,
-    empty: change.files.length === 0, files: change.files.map(file => file.path), securityTriggers: change.securityTriggers };
+    empty: change.files.length === 0, files: change.files.map(file => file.path), securityTriggers: change.securityTriggers, uiTriggers: change.uiTriggers };
 }
 // A passed evaluation carried to the current code without an evaluator: over an empty
 // change, or for security over a change with no security trigger. The policy is checked
@@ -439,7 +472,7 @@ async function carryEval(project, options) {
   return withLock(directory, async () => {
     const state = await readState(directory);
     const key = options.key;
-    if (gateForEval[key] || !/^(?:code-[a-z]+|security)$/.test(key ?? '')) fail('INVOCATION', '--key must be a code or security evaluation.');
+    if (gateForEval[key] || !/^(?:code-[a-z]+|security|ui)$/.test(key ?? '')) fail('INVOCATION', '--key must be a code, security or ui evaluation.');
     const current = state.evals[key];
     // A base kept at a milestone boundary or plan re-approval judged another scope or plan:
     // only the security evaluation, which judges no criteria, carries from one.
@@ -513,6 +546,8 @@ async function advance(project, options) {
     }
     state.stage = to;
     await writeState(directory, state);
+    // The preview served the evaluation; nothing after it needs the server.
+    if (['release', 'done', 'stopped'].includes(to)) await stopPreview(directory);
     return { run: state.run, stage: state.stage };
   });
 }
@@ -554,6 +589,24 @@ async function finish(project, options) {
   return { report: { stage: 'evaluate', ...summary, ...await changes(project, options) }, exitCode };
 }
 
+// The run's local preview for eval-ui (eval-ui.md §5.1); peos-run, not an agent, starts
+// and stops the server, so it runs only the configured command on a loopback origin.
+async function previewStart(project, options) {
+  const directory = await runDirectory(project, options.run);
+  const state = await readState(directory);
+  if (!['implement', 'verify', 'evaluate'].includes(state.stage)) fail('TRANSITION', 'A preview serves evaluation; the run is not implementing or evaluating.');
+  const config = await loadConfig(project);
+  if (!config.preview) fail('PREVIEW', 'No preview is configured in .project-os/engineering.config.json.');
+  await ignoreInRun(directory, 'preview.json');
+  const preview = await startPreview(project, directory, config.preview);
+  return { run: state.run, ...preview, viewports: config.preview.viewports, colorSchemes: config.preview.colorSchemes };
+}
+async function previewStop(project, options) {
+  const directory = await runDirectory(project, options.run);
+  const state = await readState(directory);
+  return { run: state.run, ...await stopPreview(directory) };
+}
+
 // A large run's milestone is done once its steps passed checks and evaluation.
 async function completeMilestone(project, options) {
   const directory = await runDirectory(project, options.run);
@@ -593,6 +646,7 @@ function nextAction(project, options) {
 }
 
 const handlers = { init, status, brief, begin, finish, next: nextAction, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step, grant, changes, delta, 'carry-eval': carryEval, 'record-baseline': recordBaseline, map, setup,
+  'preview-start': previewStart, 'preview-stop': previewStop,
   fingerprint: project => fingerprint(project) };
 
 await main(async () => {
@@ -629,6 +683,8 @@ await main(async () => {
     `profile: ${report.profile.status}${report.profile.reason ? ` (${report.profile.reason})` : ''}`
   ].join('\n');
   if (report.action === 'finish') return `${report.run}: ${report.checks} checks, stage ${report.stage}${report.failed.length ? `, failed: ${report.failed.join(', ')}` : ''}`;
+  if (report.action === 'preview-start') return `Preview for ${report.run} ${report.reused ? 'already running' : 'started'} at ${report.url}.`;
+  if (report.action === 'preview-stop') return `Preview for ${report.run} ${report.stopped ? 'stopped' : 'was not running'}.`;
   if (report.action === 'init') return `Run ${report.run} created at ${JSON.stringify(report.directory)}.`;
   if (report.action === 'next') return `${report.run} at ${report.stage}: ${report.do}${report.message ? ` — ${report.message}` : ''}`;
   return `${report.action}: ${report.run} updated.`;

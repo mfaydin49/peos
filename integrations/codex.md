@@ -270,6 +270,18 @@ node /path/to/personal-engineering-os/scripts/peos-run.mjs setup --project /path
   `securityTriggers` from path categories and added lines of non-test files, and the
   current `codeState`. It fails with `UNSTABLE` if the code changed while it ran.
   Triggers decide whether the security evaluator runs; they are not findings.
+  `uiTriggers` (`markup`, `style`, `native-ui`, `assets`, `copy`) do the same for the UI
+  evaluator, which runs only when a `ui-capture` check produced a valid manifest or a
+  `preview` is configured.
+- `record-checks` gives a check of kind `ui-capture` the environment variable
+  `PEOS_UI_DIR` (a fresh `<run>/ui/`); the check writes PNG or JPEG files and a
+  `manifest.json` (`shots` with file, screen, state and optional viewport and scheme;
+  optional `a11y` entries). A passing capture whose manifest is missing or invalid is
+  recorded as FAIL, and `checks.json` gets a `ui` summary.
+- `preview-start` starts the configured `preview` command in its own process group and
+  waits until its loopback URL answers (`PREVIEW` when it does not, or when the URL
+  already answers for a server the run did not start); `preview-stop` stops it, and
+  reaching `release`, `done` or `stopped` stops it too.
   `modifiedTests` lists existing test files changed or removed since the base.
   `floorFlags` lists deterministic signs that the bar was lowered (`test-made-easier`,
   `assertions-removed`, `test-deleted`, `checker-silenced`, `unfinished-work`,

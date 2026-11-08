@@ -52,9 +52,13 @@ Work:
    theme: one file (or the platform's asset catalog) with every token of `design.md`,
    so later steps use tokens, never literal values. Each interface step names the
    design's screens and states it builds.
-8. Size the plan to the change: as few steps as keep each one testable (a `standard`
+8. Each step that changes interface says how to reach each state it builds (a route, a
+   query parameter, a fixture, seeded data, a launch argument), so the UI evaluator can
+   observe it without inventing data; when the project has a `ui-capture` check, the
+   step extends that UI test to capture those screens and states.
+9. Size the plan to the change: as few steps as keep each one testable (a `standard`
    run rarely needs more than 6), and under about 100 lines.
-9. Keep the template's headings in English; write the content in the output language.
+10. Keep the template's headings in English; write the content in the output language.
 
 Output exactly one of these, nothing else:
 

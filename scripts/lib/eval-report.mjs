@@ -2,7 +2,7 @@ import { fail } from './cli.mjs';
 import { referencePattern } from './config.mjs';
 
 // Mirrors schemas/eval-report.schema.json; tests check both agree on fixtures.
-const evaluators = ['spec', 'plan', 'code', 'security', 'performance'];
+const evaluators = ['spec', 'plan', 'code', 'security', 'ui', 'performance'];
 const filePattern = new RegExp(referencePattern);
 function invalid(where, reason) { fail('EVAL_REPORT', `${where}: ${reason}`); }
 function object(value, allowed, required, where) {
