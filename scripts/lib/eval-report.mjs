@@ -32,7 +32,7 @@ export function validateEvalReport(input) {
     if (!hasFocus) invalid('focus', 'required for the code evaluator');
     oneOf(input.focus, ['acceptance', 'quality', 'tests', 'all'], 'focus');
   } else if (input.evaluator === 'plan') {
-    if (hasFocus) oneOf(input.focus, ['architecture'], 'focus');
+    if (hasFocus) oneOf(input.focus, ['architecture', 'design'], 'focus');
   } else if (hasFocus) invalid('focus', 'not allowed for this evaluator');
   if (!Array.isArray(input.criteria)) invalid('criteria', 'expected an array');
   for (const [index, entry] of input.criteria.entries()) {

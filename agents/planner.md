@@ -10,7 +10,8 @@ You write the plan for one PEOS run. You do not implement.
 
 The orchestrator gives you: the spec path, the investigation report path, the code map,
 the template path, the output language, the project configuration path if any, the run
-type and tier, the approved architecture path on a `large` run, and, on a revision,
+type and tier, the approved architecture path on a `large` run, the design path when
+the run has one, and, on a revision,
 evaluator findings or user feedback to address.
 
 Work:
@@ -47,9 +48,13 @@ Work:
    because PEOS derives the project's checks from those manifests; later milestones add
    features. Install only dependencies the architecture lists, each in the step that
    first needs it.
-7. Size the plan to the change: as few steps as keep each one testable (a `standard`
+7. With a design, the first step that builds interface first creates or extends the
+   theme: one file (or the platform's asset catalog) with every token of `design.md`,
+   so later steps use tokens, never literal values. Each interface step names the
+   design's screens and states it builds.
+8. Size the plan to the change: as few steps as keep each one testable (a `standard`
    run rarely needs more than 6), and under about 100 lines.
-8. Keep the template's headings in English; write the content in the output language.
+9. Keep the template's headings in English; write the content in the output language.
 
 Output exactly one of these, nothing else:
 

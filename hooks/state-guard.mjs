@@ -1,5 +1,5 @@
 // PreToolUse: keep run state, evidence and user decisions out of the model's reach.
-// - Under .project-os/runs/ the model may write only the run's Markdown artifacts and
+// - Under .project-os/runs/ the model may write only the run's Markdown artifacts, the design preview and
 //   pending-eval.json; everything else there belongs to peos-run.
 // - Shell commands that touch .project-os (by text or working directory) are allowed
 //   only as a plain call of this plugin's own peos-run, and never its `grant` action.
@@ -15,12 +15,12 @@ import { fileURLToPath } from 'node:url';
 import { readInput, projectRoot, emit } from './common.mjs';
 
 const peosRun = fileURLToPath(new URL('../scripts/peos-run.mjs', import.meta.url));
-const writableArtifacts = ['task.md', 'idea.md', 'investigation.md', 'spec.md', 'architecture.md', 'plan.md', 'summary.md', 'pending-eval.json'];
+const writableArtifacts = ['task.md', 'idea.md', 'investigation.md', 'spec.md', 'architecture.md', 'design.md', 'design-preview.html', 'plan.md', 'summary.md', 'pending-eval.json'];
 const pendingReport = /^pending-eval-[a-z0-9-]+\.json$/;
 // The one run file each producer or evaluator may write.
-const agentRunFile = { 'peos:spec-writer': name => name === 'spec.md', 'peos:architect': name => name === 'architecture.md', 'peos:planner': name => name === 'plan.md' };
+const agentRunFile = { 'peos:spec-writer': name => name === 'spec.md', 'peos:architect': name => name === 'architecture.md', 'peos:designer': name => ['design.md', 'design-preview.html'].includes(name), 'peos:planner': name => name === 'plan.md' };
 const writeTools = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
-const peosAgents = /^peos:(?:eval-[a-z-]+|spec-writer|architect|planner|investigator|profiler)$/;
+const peosAgents = /^peos:(?:eval-[a-z-]+|spec-writer|architect|designer|planner|investigator|profiler)$/;
 // Names only PEOS run state uses, matched in any directory and case. A project with its
 // own state.json or checks.json sees such shell commands refused (the Read/Write tools work).
 const protectedFile = /state\.json|checks\.json|state\.lock|\.grant\.json|\.stop-block|runs\/\S*evals/i;

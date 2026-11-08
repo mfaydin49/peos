@@ -9,7 +9,7 @@
   "properties": {
     "schemaVersion": { "type": "integer", "const": 1 },
     "evaluator": { "enum": ["spec", "plan", "code", "security", "performance"] },
-    "focus": { "enum": ["architecture", "acceptance", "quality", "tests", "all"] },
+    "focus": { "enum": ["architecture", "design", "acceptance", "quality", "tests", "all"] },
     "verdict": { "enum": ["PASS", "FAIL", "BLOCKED"] },
     "mode": { "enum": ["full", "degraded"] },
     "subject": { "type": "string", "pattern": "^(?:fp|sha256):[0-9a-f]{64}$" },
@@ -62,7 +62,7 @@
     },
     {
       "if": { "properties": { "evaluator": { "const": "plan" } } },
-      "then": { "properties": { "focus": { "const": "architecture" } } }
+      "then": { "properties": { "focus": { "enum": ["architecture", "design"] } } }
     },
     {
       "if": { "properties": { "evaluator": { "enum": ["spec", "security", "performance"] } } },

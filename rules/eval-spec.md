@@ -13,6 +13,12 @@ Blocking (`high` or `critical`):
   data loss or irreversible effects) that the spec-writer should have asked about.
 - A requirement appears that the request or idea does not support (invented scope).
 - A security, privacy or data-ownership need implied by the request is absent.
+- An interface criterion names no screen or state, or a screen listed under "User
+  interface" has no states.
+- The request introduces a user interface (a new application with screens, a new
+  screen, a requested visual change) and "User interface" is missing or says
+  `Design: existing`; or it says `Design: new` for a change the request does not make
+  visible.
 
 Non-blocking (`medium` or `low`): the same behavior restated in several criteria (the
 criteria count itself is enforced by `peos-run`), unclear wording, missing edge case that a planner would likely still cover, non-functional

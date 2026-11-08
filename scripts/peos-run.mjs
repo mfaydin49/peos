@@ -14,12 +14,11 @@ import { emptyProject, setupProject } from './lib/setup.mjs';
 import { summarizeUsage, usageFile } from './lib/usage.mjs';
 import { requireRoot, headCommit } from './lib/git.mjs';
 import {
-  runsPath, types, tiers, stages, tierGates, gateArtifacts, gateEvalKeys, runDirectory, runSubdirectory, readRunFile,
+  runsPath, types, tiers, stages, tierGates, gateArtifacts, gateEvalKeys, gateOrder, designRequested, runDirectory, runSubdirectory, readRunFile,
   readState, writeState, writeAtomic, writeJsonAtomic, withLock, artifactHash, configHash, fingerprint
 } from './lib/run-state.mjs';
 
 const verifyScript = fileURLToPath(new URL('verify.mjs', import.meta.url));
-const gateOrder = ['spec', 'architecture', 'plan'];
 const gateForEval = Object.fromEntries(Object.entries(gateEvalKeys).map(([gate, key]) => [key, gate]));
 const gatedStages = ['implement', 'verify', 'evaluate', 'release', 'done'];
 // Large runs split the code evaluation by focus; smaller tiers need at least one code evaluation (design §6).
@@ -257,8 +256,10 @@ async function recordEval(project, options) {
         await rm(resolve(evals, `${key}.base.json`), { force: true });
       }
     }
-    // A plan evaluated against an older spec no longer counts.
-    if (key === 'spec' && previous?.subject !== report.subject) delete state.evals.plan;
+    // Later artifacts evaluated against an older version of this one no longer count.
+    if (gate && previous?.subject !== report.subject) {
+      for (const later of gateOrder.slice(gateOrder.indexOf(gate) + 1)) delete state.evals[gateEvalKeys[later]];
+    }
     await writeState(directory, state);
     // The report is recorded: its pending file has served its purpose.
     if (consumed) await rm(consumed, { force: true });
@@ -267,7 +268,9 @@ async function recordEval(project, options) {
       plateau: report.verdict === 'FAIL' && earlier?.verdict === 'FAIL' && signature(earlier) === signature(report), ...digest(report) };
   });
 }
-const coversSpec = (state, gate) => state.tier === 'standard' && gate === 'plan' && Object.hasOwn(state.gates, 'spec');
+// A standard run decides once: the plan approval covers the earlier gates, which until
+// then only need a PASS on their current artifact.
+const decidedWithPlan = (state, gate) => state.tier === 'standard' ? gateOrder.slice(0, gateOrder.indexOf(gate)).filter(name => Object.hasOwn(state.gates, name)) : [];
 function requireFreshPass(assessment, gate) {
   const evaluation = assessment.evals[gateEvalKeys[gate]];
   if (!evaluation || !evaluation.fresh || evaluation.verdict !== 'PASS') fail('GATE', `The ${gateEvalKeys[gate]} evaluation must PASS on the current ${gateArtifacts[gate]} before approval.`);
@@ -280,8 +283,7 @@ async function approve(project, options) {
     const gate = choice(options.gate, Object.keys(state.gates), 'gate');
     await consumeGrant(project, 'approve', gate, state.run);
     const assessment = await assess(directory, state, null);
-    // A standard run decides once: the plan approval also covers an unapproved spec.
-    const covered = coversSpec(state, gate) && !assessment.gates.spec.fresh ? ['spec'] : [];
+    const covered = gate === 'plan' ? decidedWithPlan(state, gate).filter(name => !assessment.gates[name].fresh) : [];
     const earlier = gateOrder.slice(0, gateOrder.indexOf(gate)).filter(name => Object.hasOwn(state.gates, name));
     const open = earlier.filter(name => !assessment.gates[name].fresh && !covered.includes(name));
     if (open.length) fail('GATE', `Approve earlier gates first: ${open.join(', ')}.`);
@@ -297,7 +299,9 @@ async function approve(project, options) {
     // rest is implemented again, and passed code evaluations become the bases of the next
     // ones (eval-economy.md). The summary of the earlier plan no longer describes the run.
     if (decided.includes('plan')) {
-      const digest = planDigest(await readRunFile(directory, 'plan.md') ?? '', await readRunFile(directory, 'spec.md'), await readRunFile(directory, 'architecture.md'));
+      // The design shapes every interface step as the architecture shapes every step.
+      const [architecture, design] = [await readRunFile(directory, 'architecture.md'), await readRunFile(directory, 'design.md')];
+      const digest = planDigest(await readRunFile(directory, 'plan.md') ?? '', await readRunFile(directory, 'spec.md'), design === null || !state.gates.design ? architecture : `${architecture ?? ''}\0${design}`);
       if (Object.keys(state.steps).length || state.milestones) {
         const old = state.planDigest;
         const steps = Object.fromEntries(Object.entries(state.steps).filter(([id, status]) => status === 'done' && old?.steps[id] && old.steps[id] === digest.steps[id]));
@@ -472,9 +476,9 @@ async function advance(project, options) {
     // evaluated spec, which the user approves together with the plan.
     if (gateOrder.includes(to)) {
       const assessment = await assess(directory, state, null);
-      const covered = coversSpec(state, to) && !assessment.gates.spec.fresh;
-      if (covered) requireFreshPass(assessment, 'spec');
-      const open = gateOrder.slice(0, gateOrder.indexOf(to)).filter(name => Object.hasOwn(assessment.gates, name) && !assessment.gates[name].fresh && !(covered && name === 'spec'));
+      const covered = decidedWithPlan(state, to).filter(name => !assessment.gates[name].fresh);
+      for (const name of covered) requireFreshPass(assessment, name);
+      const open = gateOrder.slice(0, gateOrder.indexOf(to)).filter(name => Object.hasOwn(assessment.gates, name) && !assessment.gates[name].fresh && !covered.includes(name));
       if (open.length) fail('GATE', `Approve earlier gates first: ${open.join(', ')}.`);
     }
     if (gatedStages.includes(to)) {
@@ -565,9 +569,27 @@ async function completeMilestone(project, options) {
     return { run: state.run, milestones: state.milestones };
   });
 }
+// The design gate follows the spec (design-gate.md): a standard or large run has it while
+// spec.md says `Design: new`; one not approved on the current spec goes when it no longer asks for it.
+async function designGate(project, options) {
+  const directory = await runDirectory(project, options.run);
+  return withLock(directory, async () => {
+    const state = await readState(directory);
+    const wanted = ['standard', 'large'].includes(state.tier) && designRequested(await readRunFile(directory, 'spec.md'));
+    const present = Object.hasOwn(state.gates, 'design');
+    if (wanted && !present) {
+      state.gates = Object.fromEntries(gateOrder.filter(name => name === 'design' || Object.hasOwn(state.gates, name)).map(name => [name, state.gates[name] ?? { status: 'pending' }]));
+    } else if (!wanted && present && !(await assess(directory, state, null)).gates.design.fresh) {
+      delete state.gates.design;
+      delete state.evals[gateEvalKeys.design];
+    } else return { run: state.run, changed: false, design: present };
+    await writeState(directory, state);
+    return { run: state.run, changed: true, design: wanted };
+  });
+}
 // The run's control flow: the next action for the orchestrator (design peos-next.md).
 function nextAction(project, options) {
-  return next(project, options, { status, advance, step, recordEval, changes, delta, carryEval, map, setup, completeMilestone });
+  return next(project, options, { status, advance, step, recordEval, changes, delta, carryEval, map, setup, completeMilestone, designGate });
 }
 
 const handlers = { init, status, brief, begin, finish, next: nextAction, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step, grant, changes, delta, 'carry-eval': carryEval, 'record-baseline': recordBaseline, map, setup,

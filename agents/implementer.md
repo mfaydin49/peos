@@ -12,7 +12,8 @@ evaluator findings. You do not plan, approve, evaluate or change the scope.
 
 The orchestrator gives you: the spec (or task) path, the plan path and the step IDs,
 the project's configured check commands, on a `large` run the approved architecture and
-the milestone, and on a fix round the failures or findings.
+the milestone, the approved design when the run has one, and on a fix round the
+failures or findings.
 
 Follow ${CLAUDE_PLUGIN_ROOT}/rules/code-quality.md and ${CLAUDE_PLUGIN_ROOT}/rules/testing.md,
 plus ${CLAUDE_PLUGIN_ROOT}/rules/security.md and ${CLAUDE_PLUGIN_ROOT}/rules/ui-ux.md where
@@ -24,6 +25,9 @@ starting the next):
 1. Read the step, the acceptance criteria it covers and the code it touches. Reuse
    existing modules, patterns and test helpers; the code map
    (`.project-os/cache/code-map.md`), when given, lists what the project already defines.
+   With a design, build its screens and states as `design.md` describes them, take every
+   color, font, spacing, radius and duration from the theme its tokens define, and
+   reuse its components; a value the design lacks is reported under Notes, not invented.
 2. Write the tests the step names together with the code, derived from its acceptance
    criteria. A bug fix starts with a test that fails before the fix.
 3. Change only the files the step lists, plus what those changes strictly require. If

@@ -10,13 +10,13 @@ import { loadConfig } from './config.mjs';
 import { digest, signature } from './eval-report.mjs';
 import { headCommit } from './git.mjs';
 import { codeMapPath } from './map.mjs';
-import { gateArtifacts, gateEvalKeys, readRunFile } from './run-state.mjs';
+import { designRequested, gateArtifacts, gateEvalKeys, gateOrder, readRunFile } from './run-state.mjs';
 
 const toolkit = fileURLToPath(new URL('../../', import.meta.url));
 const template = name => resolve(toolkit, 'templates/run', name);
-const gateOrder = ['spec', 'architecture', 'plan'];
-const producers = { spec: 'peos:spec-writer', architecture: 'peos:architect', plan: 'peos:planner' };
-const gateEvaluators = { spec: 'peos:eval-spec', architecture: 'peos:eval-plan', plan: 'peos:eval-plan' };
+const producers = { spec: 'peos:spec-writer', architecture: 'peos:architect', design: 'peos:designer', plan: 'peos:planner' };
+const gateEvaluators = { spec: 'peos:eval-spec', architecture: 'peos:eval-plan', design: 'peos:eval-plan', plan: 'peos:eval-plan' };
+const gateStages = ['intake', ...gateOrder];
 const codeStages = ['implement', 'verify', 'evaluate'];
 const pendingReport = /^pending-eval-([a-z0-9-]+)\.json$/;
 // Bookkeeping steps per call; more means the state does not converge, which is a defect.
@@ -144,6 +144,8 @@ async function decide(project, context, { options, errors, h }) {
   const investigation = await exists(path('investigation.md')) ? path('investigation.md') : undefined;
   const idea = await exists(path('idea.md')) ? path('idea.md') : undefined;
   const architecture = state.gates.architecture ? path('architecture.md') : undefined;
+  const design = state.gates.design ? path('design.md') : undefined;
+  const preview = path('design-preview.html');
   const mapPath = resolve(project, codeMapPath);
   // A refused transition is the user's to resolve; its reason is the message.
   const advance = async to => {
@@ -155,22 +157,32 @@ async function decide(project, context, { options, errors, h }) {
   if (state.stage === 'done') return { do: 'finished', summary: path('summary.md') };
   if (state.stage === 'stopped') return { do: 'stop', code: 'STOPPED', message: 'The run was stopped; start a new run.' };
 
-  // Gates, in order. A standard run passes its spec on a PASS and decides spec and plan
-  // together at the plan gate.
+  // The design gate follows what the spec asks for until implementation starts (design-gate.md).
+  if (['standard', 'large'].includes(state.tier) && gateStages.includes(state.stage)) {
+    const wanted = designRequested(await readRunFile(directory, 'spec.md'));
+    if (wanted !== Boolean(design) && (wanted || !assessment.gates.design.fresh) && (await h.designGate(project, { run })).changed) {
+      return { applied: wanted ? 'design gate added' : 'design gate removed' };
+    }
+  }
+
+  // Gates, in order. A standard run passes its spec and design on a PASS and decides them
+  // with the plan at the plan gate.
   for (const gate of gateOrder.filter(name => Object.hasOwn(state.gates, name))) {
     if (assessment.gates[gate].fresh) continue;
     const key = gateEvalKeys[gate];
     const evaluation = assessment.evals[key];
     const hash = artifacts[gate];
     const revising = state.gates[gate].status === 'revision_requested' && (hash === null || state.gates[gate].artifactHash === hash);
-    if (state.tier === 'standard' && gate === 'spec' && !revising && evaluation?.fresh && evaluation.verdict === 'PASS') continue;
+    if (state.tier === 'standard' && gate !== 'plan' && !revising && evaluation?.fresh && evaluation.verdict === 'PASS') continue;
     if (state.stage !== gate) return advance(gate);
     if (gate === 'plan' && (await h.map(project)).changed) return { applied: 'code map' };
     const output = path(gateArtifacts[gate]);
     const inputs = {
       spec: { request: idea ?? investigation, investigation, type: state.type, tier: state.tier, template: template('spec.md'), output },
       architecture: { spec: path('spec.md'), request: idea, investigation, template: template('architecture.md'), output },
-      plan: { spec: path('spec.md'), architecture, investigation, 'code map': mapPath, type: state.type, tier: state.tier,
+      design: { spec: path('spec.md'), architecture, request: idea, investigation, 'design references': config?.references.design?.length ? config.references.design : undefined,
+        template: template('design.md'), output, preview },
+      plan: { spec: path('spec.md'), architecture, design, investigation, 'code map': mapPath, type: state.type, tier: state.tier,
         configuration: resolve(project, '.project-os/engineering.config.json'), template: template('plan.md'), output }
     }[gate];
     const producer = extra => ({ do: 'spawn', agents: [{ agent: producers[gate], inputs: { ...inputs, ...common, ...extra } }], then: 'next' });
@@ -189,7 +201,8 @@ async function decide(project, context, { options, errors, h }) {
       const evaluatorInputs = {
         spec: { spec: output, request: idea ?? investigation },
         architecture: { focus: 'architecture', architecture: output, spec: path('spec.md'), request: idea, investigation },
-        plan: { plan: output, spec: path('spec.md'), architecture, investigation, 'code map': mapPath }
+        design: { focus: 'design', design: output, preview, spec: path('spec.md'), architecture },
+        plan: { plan: output, spec: path('spec.md'), architecture, design, investigation, 'code map': mapPath }
       }[gate];
       return { do: 'spawn', then: 'next', agents: [{ agent: gateEvaluators[gate], inputs: { ...evaluatorInputs, profile, subject: hash, report,
         ...(previous ? { 'previous blocking findings': digest(previous).blocking, round: 'later round: check that these are fixed and nothing broke' } : {}),
@@ -203,9 +216,10 @@ async function decide(project, context, { options, errors, h }) {
       const report = await readJson(directory, `evals/${key}.json`);
       return producer({ findings: report ? digest(report).blocking : 'see the recorded evaluation', 'unmet criteria': report ? digest(report).unmetCriteria : [] });
     }
-    return { do: 'gate', gates: state.tier === 'standard' ? ['spec', 'plan'] : [gate],
-      artifacts: (state.tier === 'standard' ? ['spec', 'plan'] : [gate]).map(name => path(gateArtifacts[name])),
-      message: `Approve with /peos:approve${state.tier === 'standard' ? '' : ` ${gate}`}, or request changes with /peos:revise ${state.tier === 'standard' ? '<spec|plan>' : gate} <feedback>.` };
+    const decided = state.tier === 'standard' ? gateOrder.filter(name => Object.hasOwn(state.gates, name)) : [gate];
+    return { do: 'gate', gates: decided,
+      artifacts: [...decided.map(name => path(gateArtifacts[name])), ...(decided.includes('design') && await exists(preview) ? [preview] : [])],
+      message: `Approve with /peos:approve${state.tier === 'standard' ? '' : ` ${gate}`}, or request changes with /peos:revise ${state.tier === 'standard' ? `<${decided.join('|')}>` : gate} <feedback>.${decided.includes('design') && await exists(preview) ? ` Open ${preview} in a browser to see the design.` : ''}` };
   }
 
   // Implementation. Small tiers plan inline in task.md.
@@ -266,7 +280,7 @@ async function decide(project, context, { options, errors, h }) {
   // The last open milestone judges every criterion, also when later ones were kept done
   // by a plan re-approval.
   const final = !current || milestones.every(milestone => milestone === current || state.milestones?.[milestone.id] === 'done');
-  const implementerInputs = { spec: specPath, plan: path(planFile), architecture, 'code map': mapPath, checks, ...common,
+  const implementerInputs = { spec: specPath, plan: path(planFile), architecture, design, 'code map': mapPath, checks, ...common,
     ...(architecture ? { dependencies: 'install only the dependencies the approved architecture lists, with the project\'s package manager' } : {}) };
   const remaining = current ? current.steps.filter(id => state.steps[id] !== 'done') : [];
   if (remaining.length) {
@@ -367,7 +381,7 @@ async function decide(project, context, { options, errors, h }) {
         ...(errors[key] ? { 'previous report rejected': errors[key] } : {}) };
       if (key === 'security') agents.push({ agent: 'peos:eval-security', inputs: { ...shared, triggers: basis ? basis.securityTriggers : change.securityTriggers } });
       else if (key.startsWith('code-')) agents.push({ agent: 'peos:eval-code', ...(['trivial', 'small'].includes(state.tier) ? { model: 'sonnet' } : {}), inputs: { ...shared,
-        focus: key.slice('code-'.length), plan: path(planFile), floorFlags: change.floorFlags, shortcuts: change.shortcuts,
+        focus: key.slice('code-'.length), plan: path(planFile), design, floorFlags: change.floorFlags, shortcuts: change.shortcuts,
         ...(state.type === 'refactor' ? { 'run type': 'refactor', modifiedTests: change.modifiedTests } : {}),
         ...(covered && !final ? { milestone: current.id, 'criteria in scope': covered, scope: 'report criteria outside this list not_assessed: a later milestone covers them' } : {}) } });
       else return { do: 'stop', code: 'EVALUATOR', message: `No evaluator is known for the recorded evaluation ${key}.` };

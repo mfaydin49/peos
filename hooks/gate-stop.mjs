@@ -6,9 +6,9 @@ import { readInput, projectRoot, profile, activeRuns, emit, transcriptEntries, s
 import { artifactHash, gateArtifacts, gateEvalKeys } from '../scripts/lib/run-state.mjs';
 
 const recentMs = 60 * 60 * 1000;
-const producers = { spec: 'peos:spec-writer', architecture: 'peos:architect', plan: 'peos:planner' };
-// The architecture is judged by the plan evaluator with focus architecture.
-const evaluators = { spec: 'peos:eval-spec', architecture: 'peos:eval-plan', plan: 'peos:eval-plan' };
+const producers = { spec: 'peos:spec-writer', architecture: 'peos:architect', design: 'peos:designer', plan: 'peos:planner' };
+// The architecture and the design are judged by the plan evaluator with their focus.
+const evaluators = { spec: 'peos:eval-spec', architecture: 'peos:eval-plan', design: 'peos:eval-plan', plan: 'peos:eval-plan' };
 // Hosts may run agents in the background: the turn ends while the agent works and its
 // result arrives later as a hand-back. An evaluator launched after the artifact was
 // written, or a producer still rewriting it, is pending until handed back, so stopping

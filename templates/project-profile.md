@@ -19,6 +19,10 @@
 ## Boundaries and dependencies
 <!-- Which layers may import which; public contracts; generated or vendored code to leave alone. -->
 
+## Design system
+<!-- Theme and token files, component library, icon set, typography, light/dark support,
+     breakpoints or size classes; "none" when screens use literal values. -->
+
 ## Conventions
 <!-- Testing style and helpers, error handling, logging, i18n, naming, formatting, docs rules. -->
 

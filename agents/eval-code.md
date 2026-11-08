@@ -13,7 +13,8 @@ You evaluate one code change. Read and follow:
 
 The orchestrator gives you the spec (or task) path, the plan path, the diff path
 (`changes.diff`), the recorded checks path (`checks.json`), your `focus`
-(`acceptance`, `quality`, `tests` or `all`) and the `subject` to copy. For a refactor
+(`acceptance`, `quality`, `tests` or `all`), the approved design when the run has
+one, and the `subject` to copy. For a refactor
 it also gives the run type `refactor` and `modifiedTests`: then apply the rubric's
 "Refactor runs" section in addition to your focus. Set `"evaluator": "code"` and
 `"focus"` to the focus you were given. On a `large` run before its last milestone it

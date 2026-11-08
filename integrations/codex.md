@@ -235,7 +235,7 @@ node /path/to/personal-engineering-os/scripts/peos-run.mjs status --project /pat
 node /path/to/personal-engineering-os/scripts/peos-run.mjs fingerprint --project /path/to/project
 node /path/to/personal-engineering-os/scripts/peos-run.mjs record-checks --project /path/to/project --run <run> --phase task [--checks '["tests"]']
 node /path/to/personal-engineering-os/scripts/peos-run.mjs record-eval --project /path/to/project --run <run> --report /tmp/report.json   # or --report - for stdin
-node /path/to/personal-engineering-os/scripts/peos-run.mjs approve|revise --project /path/to/project --run <run> --gate spec|architecture|plan
+node /path/to/personal-engineering-os/scripts/peos-run.mjs approve|revise --project /path/to/project --run <run> --gate spec|architecture|design|plan
 node /path/to/personal-engineering-os/scripts/peos-run.mjs reset-eval --project /path/to/project --run <run> --key code-all
 node /path/to/personal-engineering-os/scripts/peos-run.mjs advance --project /path/to/project --run <run> --to <stage>
 node /path/to/personal-engineering-os/scripts/peos-run.mjs step --project /path/to/project --run <run> --step S1 --status done
@@ -323,7 +323,7 @@ node /path/to/personal-engineering-os/scripts/peos-run.mjs setup --project /path
   spec whose evaluation PASSed on the current `spec.md`. An approval goes stale when its artifact or an earlier approved
   artifact changes; a new approval reopens every later gate. `revise` reopens the gate
   and every later gate, and is refused on a finished run.
-- `advance` to a gated stage (`architecture`, `plan`) requires every earlier tier gate
+- `advance` to a gated stage (`architecture`, `design`, `plan`) requires every earlier tier gate
   fresh (a `standard` run may plan on a spec with a fresh PASS evaluation); to `implement`/`verify`/`evaluate` all tier gates fresh; to
   `release` additionally a full PASS `checks.json` (either phase) and PASS code
   evaluations (at least one `code-*`; `large` needs the acceptance, quality and tests

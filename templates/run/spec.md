@@ -17,6 +17,15 @@ tier: standard | large
 ## Non-goals
 -
 
+## User interface
+<!-- Remove this section when the change has no user interface.
+     First line: `Design: new` for a new application, new screens or a visual direction
+     to set (PEOS then writes and asks you to approve a design), or `Design: existing`
+     when the change follows existing screens and the project's design system.
+     Then the screens and states, and the visual direction you gave, if any:
+     | Screen / route | States | Notes |
+     States from: default, loading, empty, error, pending, success, disabled, destructive confirm. -->
+
 ## Acceptance criteria
 <!-- Observable and measurable. One behavior per criterion.
      refactor: state preserved behavior (existing tests pass unchanged, public API and

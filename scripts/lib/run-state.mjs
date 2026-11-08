@@ -8,12 +8,21 @@ import { git, requireRoot, headCommit } from './git.mjs';
 export const runsPath = '.project-os/runs';
 export const types = ['app', 'feature', 'change', 'fix', 'refactor'];
 export const tiers = ['trivial', 'small', 'standard', 'large'];
-export const stages = ['intake', 'spec', 'architecture', 'plan', 'implement', 'verify', 'evaluate', 'release', 'done', 'stopped'];
+export const stages = ['intake', 'spec', 'architecture', 'design', 'plan', 'implement', 'verify', 'evaluate', 'release', 'done', 'stopped'];
 export const tierGates = { trivial: [], small: [], standard: ['spec', 'plan'], large: ['spec', 'architecture', 'plan'] };
-export const gateArtifacts = { spec: 'spec.md', architecture: 'architecture.md', plan: 'plan.md' };
+export const gateArtifacts = { spec: 'spec.md', architecture: 'architecture.md', design: 'design.md', plan: 'plan.md' };
+// Gate order; a run has the gates its tier starts with, plus `design` while its spec asks for one.
+export const gateOrder = ['spec', 'architecture', 'design', 'plan'];
 // The evaluation that must PASS on the current artifact before its human gate opens.
-export const gateEvalKeys = { spec: 'spec', architecture: 'plan-architecture', plan: 'plan' };
-// The gate the user decides next. A standard run decides once: its plan approval covers the spec.
+export const gateEvalKeys = { spec: 'spec', architecture: 'plan-architecture', design: 'plan-design', plan: 'plan' };
+// A spec that introduces new user interface asks for a design (design-gate.md): its
+// `## User interface` section says `Design: new`.
+export function designRequested(specSource) {
+  const section = /^##[ \t]+User interface[ \t]*$([\s\S]*?)(?=^##[ \t]|(?![\s\S]))/m.exec(specSource ?? '')?.[1] ?? '';
+  // Markdown emphasis and code marks around the line do not change what it says.
+  return /^[ \t|]*(?:[-+][ \t]*)?Design:[ \t]*new\b/im.test(section.replace(/<!--[\s\S]*?-->/g, '').replace(/[`*_]/g, ''));
+}
+// The gate the user decides next. A standard run decides once: its plan approval covers the spec and the design.
 export function decisionGate(state) {
   const open = Object.keys(state.gates).filter(gate => state.gates[gate].status !== 'approved');
   return state.tier === 'standard' ? open.at(-1) : open[0];
@@ -192,10 +201,17 @@ export async function configHash(project) {
   const current = await info(path);
   return current?.isFile() ? `sha256:${await sha256File(path)}` : null;
 }
+export const designPreview = 'design-preview.html';
 export async function artifactHash(directory, gate) {
   const path = resolve(directory, gateArtifacts[gate]);
   const current = await info(path);
   if (!current || !current.isFile()) return null;
+  // The preview is part of the design the user approves: changing either changes the design.
+  if (gate === 'design') {
+    const preview = await info(resolve(directory, designPreview));
+    const previewHash = preview?.isFile() ? await sha256File(resolve(directory, designPreview)) : 'none';
+    return `sha256:${createHash('sha256').update(`${await sha256File(path)}\0${previewHash}`).digest('hex')}`;
+  }
   return `sha256:${await sha256File(path)}`;
 }
 

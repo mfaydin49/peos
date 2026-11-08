@@ -11,13 +11,14 @@
     "run": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*$", "maxLength": 80 },
     "type": { "enum": ["app", "feature", "change", "fix", "refactor"] },
     "tier": { "enum": ["trivial", "small", "standard", "large"] },
-    "stage": { "enum": ["intake", "spec", "architecture", "plan", "implement", "verify", "evaluate", "release", "done", "stopped"] },
+    "stage": { "enum": ["intake", "spec", "architecture", "design", "plan", "implement", "verify", "evaluate", "release", "done", "stopped"] },
     "gates": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "spec": { "$ref": "#/$defs/gate" },
         "architecture": { "$ref": "#/$defs/gate" },
+        "design": { "$ref": "#/$defs/gate" },
         "plan": { "$ref": "#/$defs/gate" }
       }
     },

@@ -27,7 +27,11 @@ Blocking: dead or obsolete code left behind; an abstraction, layer or option wit
 established need; duplication of an existing helper; a violation of the project's
 conventions or architecture (layer boundaries, error handling, naming); an unexplained
 change outside the plan's files; mutation of inputs or shared state the design forbids.
-Non-blocking: naming and readability improvements, small simplifications.
+With a design (`design.md`): a literal color, font size, spacing or duration in
+interface code where a token exists; a state the design describes for a changed screen
+that the code does not render; a hand-built control where the design or the project
+names a component. Non-blocking: naming and readability improvements, small
+simplifications.
 
 ## Focus `tests`
 

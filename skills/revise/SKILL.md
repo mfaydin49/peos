@@ -1,13 +1,13 @@
 ---
 name: revise
-description: Request changes to a PEOS gate artifact (spec, architecture or plan) with feedback.
-argument-hint: "<spec|architecture|plan> [--run <name>] <feedback>"
+description: Request changes to a PEOS gate artifact (spec, architecture, design or plan) with feedback.
+argument-hint: "<spec|architecture|design|plan> [--run <name>] <feedback>"
 disable-model-invocation: true
 ---
 
 The user requests changes: $ARGUMENTS
 
-The first word is the gate (`spec`, `architecture` or `plan`). If the next words are
+The first word is the gate (`spec`, `architecture`, `design` or `plan`). If the next words are
 `--run <name>`, that names the run; the rest is the feedback. Without `--run`, use
 the most recently updated run that is not `done` or `stopped`, and ask if several are
 equally likely.

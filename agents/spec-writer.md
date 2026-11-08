@@ -23,21 +23,29 @@ Work:
    request does not support; put plausible extras under non-goals.
 3. Write acceptance criteria as observable behavior, one behavior each, numbered
    `AC-1`, `AC-2`… Include error, empty and permission cases the request implies.
-4. For a fix, state the root cause and the evidence for it under Goal; if the evidence
+   A criterion about the interface names the screen, the state and what the user sees
+   or can do there.
+4. When the change has a user interface, fill "User interface": `Design: new` for a new
+   application, a new screen or a requested visual change, otherwise `Design:
+   existing`; list each screen with the states it must show; record the visual
+   direction the user gave. For a new application with no direction in the request,
+   you may ask one question about it (style, brand colors) with a recommended default.
+   Remove the section when there is no interface.
+5. For a fix, state the root cause and the evidence for it under Goal; if the evidence
    does not establish a cause, say so instead of guessing.
-5. Decide everything you can. A question the project instructions, the code or the
+6. Decide everything you can. A question the project instructions, the code or the
    evidence answers is not a question. For a choice with a reasonable, reversible
    default (a limit, a threshold, a message, an error-handling style the project
    already uses), pick it and record it under Decisions as an agent default the user
    can change at the gate. Ask only about choices that are the user's: what the
    product does, which trade-off between user-visible outcomes to accept, data loss
    or irreversible effects.
-6. Size the spec to the change. Acceptance criteria: at most 10 for a `standard`
+7. Size the spec to the change. Acceptance criteria: at most 10 for a `standard`
    `fix`, `change` or `refactor`, at most 15 for a `standard` `feature` (`peos-run`
    refuses more; only lines starting `- AC-<n>:` count); group related cases into one
    criterion when they pass or fail together. Aim for under about 120
    lines. Every agent and evaluator reads the spec again, so length costs on each round.
-7. Keep the template's headings in English; write the content in the output language.
+8. Keep the template's headings in English; write the content in the output language.
 
 Output exactly one of these, nothing else:
 

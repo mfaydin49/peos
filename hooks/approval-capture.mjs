@@ -7,8 +7,8 @@ import { decisionGate, runDirectory } from '../scripts/lib/run-state.mjs';
 
 const name = '[a-z0-9]+(?:-[a-z0-9]+)*';
 const patterns = [
-  [new RegExp(`^/peos:approve(?:\\s+(spec|architecture|plan)(?:\\s+(${name}))?)?\\s*$`), 'approve'],
-  [new RegExp(`^/peos:revise\\s+(spec|architecture|plan)(?:\\s+--run\\s+(${name}))?(?:\\s[\\s\\S]*)?$`), 'revise'],
+  [new RegExp(`^/peos:approve(?:\\s+(spec|architecture|design|plan)(?:\\s+(${name}))?)?\\s*$`), 'approve'],
+  [new RegExp(`^/peos:revise\\s+(spec|architecture|design|plan)(?:\\s+--run\\s+(${name}))?(?:\\s[\\s\\S]*)?$`), 'revise'],
   [new RegExp(`^/peos:retry\\s+(${name})(?:\\s+(${name}))?\\s*$`), 'reset-eval']
 ];
 

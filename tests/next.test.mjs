@@ -5,6 +5,7 @@ import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { check, config, fixture, git, jsonCli, repository, saveConfig } from './helpers.mjs';
 import { parsePlan, planDigest } from '../scripts/lib/next.mjs';
+import { designRequested } from '../scripts/lib/run-state.mjs';
 
 const cliRun = (project, action, args = []) => jsonCli('peos-run.mjs', [action, '--project', project, ...args]).report;
 // The user's decision commands leave a grant; the CLI records one outside Claude Code.
@@ -442,4 +443,153 @@ test('a step digest covers its whole criteria and the architecture', () => {
   assert.notEqual(before.steps.S1, wider.steps.S1, 'a continuation line is part of the criterion');
   assert.equal(before.steps.S2, wider.steps.S2);
   assert.notEqual(before.steps.S2, planDigest(plan, spec(5), '# Architecture B\n').steps.S2);
+});
+
+const uiSpec = (design = 'new') => `# Spec\n\n## User interface\n<!-- Design: new -->\nDesign: ${design}\n| Screen | States |\n| Home | loading, empty |\n\n## Acceptance criteria\n- AC-1: a\n- AC-2: b\n`;
+
+test('a spec asks for a design only with Design: new in its User interface section', () => {
+  assert.equal(designRequested(uiSpec()), true);
+  assert.equal(designRequested(uiSpec('existing')), false);
+  assert.equal(designRequested('# Spec\n\n## User interface\n<!-- Design: new -->\n\n## Goal\nDesign: new\n'), false, 'comments and other sections do not count');
+  assert.equal(designRequested(null), false);
+  for (const line of ['`Design: new`', '**Design:** new', 'Design: `new`', '- **Design**: new', '| Design: new |']) assert.equal(designRequested(`## User interface\n${line}\n`), true, line);
+});
+
+test('a large run with new screens decides a design between architecture and plan, and builds from it', async t => {
+  const { project, name, dir } = await start(t, { tier: 'large' });
+  await writeFile(resolve(dir, 'idea.md'), 'Reports app.');
+  next(project, name);
+  await writeFile(resolve(dir, 'spec.md'), uiSpec());
+  const specEval = next(project, name);
+  assert.ok(specEval.applied.includes('design gate added'));
+  assert.deepEqual(Object.keys(JSON.parse(await readFile(resolve(dir, 'state.json'))).gates), ['spec', 'architecture', 'design', 'plan']);
+  await report(dir, 'spec', { evaluator: 'spec', verdict: 'PASS', subject: specEval.agents[0].inputs.subject });
+  next(project, name);
+  decide(project, 'approve', '--gate', 'spec', name);
+  next(project, name);
+  await writeFile(resolve(dir, 'architecture.md'), '# Architecture\n');
+  await report(dir, 'plan-architecture', { evaluator: 'plan', focus: 'architecture', verdict: 'PASS', subject: next(project, name).agents[0].inputs.subject });
+  next(project, name);
+  decide(project, 'approve', '--gate', 'architecture', name);
+  const designer = next(project, name);
+  assert.deepEqual([designer.stage, agentsOf(designer).join()], ['design', 'peos:designer']);
+  assert.deepEqual([designer.agents[0].inputs.output, designer.agents[0].inputs.preview, designer.agents[0].inputs.architecture],
+    [resolve(dir, 'design.md'), resolve(dir, 'design-preview.html'), resolve(dir, 'architecture.md')]);
+  assert.match(designer.agents[0].inputs.template, /templates\/run\/design\.md$/);
+  await writeFile(resolve(dir, 'design.md'), '# Design\n');
+  await writeFile(resolve(dir, 'design-preview.html'), '<p>preview</p>');
+  const designEval = next(project, name);
+  assert.deepEqual([agentsOf(designEval).join(), designEval.agents[0].inputs.focus], ['peos:eval-plan', 'design']);
+  assert.match(designEval.agents[0].inputs.report, /pending-eval-plan-design\.json$/);
+  await report(dir, 'plan-design', { evaluator: 'plan', focus: 'design', verdict: 'PASS', subject: designEval.agents[0].inputs.subject });
+  const gate = next(project, name);
+  assert.deepEqual(gate.gates, ['design']);
+  assert.ok(gate.artifacts.includes(resolve(dir, 'design-preview.html')));
+  assert.match(gate.message, /design-preview\.html/);
+  decide(project, 'approve', '--gate', 'design', name);
+  const planner = next(project, name);
+  assert.equal(planner.agents[0].inputs.design, resolve(dir, 'design.md'));
+  await writeFile(resolve(dir, 'plan.md'), '# Plan\n## Milestones\n- M1: all — steps: S1\n\n## Steps\n\n### S1 — theme\n- Covers: AC-1, AC-2\n');
+  const planEval = next(project, name);
+  assert.equal(planEval.agents[0].inputs.design, resolve(dir, 'design.md'));
+  await report(dir, 'plan', { evaluator: 'plan', verdict: 'PASS', subject: planEval.agents[0].inputs.subject });
+  next(project, name);
+  decide(project, 'approve', '--gate', 'plan', name);
+  const implement = next(project, name);
+  assert.equal(implement.agents[0].inputs.design, resolve(dir, 'design.md'));
+  // Approved designs stay even when nothing else changes.
+  assert.equal(JSON.parse(await readFile(resolve(dir, 'state.json'))).gates.design.status, 'approved');
+});
+
+test('a standard run passes its design on a PASS and decides spec, design and plan at once; Design: existing has no gate', async t => {
+  const { project, name, dir } = await start(t, { tier: 'standard' });
+  await writeFile(resolve(dir, 'idea.md'), 'Add a reports screen.');
+  next(project, name);
+  await writeFile(resolve(dir, 'spec.md'), uiSpec());
+  await report(dir, 'spec', { evaluator: 'spec', verdict: 'PASS', subject: next(project, name).agents[0].inputs.subject });
+  const designer = next(project, name);
+  assert.deepEqual(agentsOf(designer), ['peos:designer']);
+  assert.equal(designer.agents[0].inputs.architecture, undefined);
+  await writeFile(resolve(dir, 'design.md'), '# Design\n');
+  await report(dir, 'plan-design', { evaluator: 'plan', focus: 'design', verdict: 'PASS', subject: next(project, name).agents[0].inputs.subject });
+  assert.deepEqual(agentsOf(next(project, name)), ['peos:planner']);
+  await writeFile(resolve(dir, 'plan.md'), '# Plan\n\n## Steps\n\n### S1 — screen\n- Covers: AC-1, AC-2\n');
+  await report(dir, 'plan', { evaluator: 'plan', verdict: 'PASS', subject: next(project, name).agents[0].inputs.subject });
+  const gate = next(project, name);
+  assert.deepEqual(gate.gates, ['spec', 'design', 'plan']);
+  assert.match(gate.message, /<spec\|design\|plan>/);
+  const approved = decide(project, 'approve', '--gate', 'plan', name);
+  assert.deepEqual(Object.values(approved.gates).map(entry => entry.status), ['approved', 'approved', 'approved']);
+  assert.equal(next(project, name).agents[0].inputs.design, resolve(dir, 'design.md'));
+
+  const other = await start(t, { tier: 'standard' });
+  await writeFile(resolve(other.dir, 'idea.md'), 'Rename a button.');
+  next(other.project, other.name);
+  await writeFile(resolve(other.dir, 'spec.md'), uiSpec('existing'));
+  assert.deepEqual(agentsOf(next(other.project, other.name)), ['peos:eval-spec']);
+  assert.deepEqual(Object.keys(JSON.parse(await readFile(resolve(other.dir, 'state.json'))).gates), ['spec', 'plan']);
+});
+
+test('a revised spec without Design: new removes an unapproved design gate; small runs never get one', async t => {
+  const { project, name, dir } = await start(t, { tier: 'standard' });
+  await writeFile(resolve(dir, 'idea.md'), 'Add a reports screen.');
+  next(project, name);
+  await writeFile(resolve(dir, 'spec.md'), uiSpec());
+  await report(dir, 'spec', { evaluator: 'spec', verdict: 'PASS', subject: next(project, name).agents[0].inputs.subject });
+  assert.deepEqual(agentsOf(next(project, name)), ['peos:designer']);
+  await writeFile(resolve(dir, 'spec.md'), uiSpec('existing'));
+  const after = next(project, name);
+  assert.ok(after.applied.includes('design gate removed'));
+  assert.deepEqual(agentsOf(after), ['peos:eval-spec']);
+  assert.equal(JSON.parse(await readFile(resolve(dir, 'state.json'))).gates.design, undefined);
+
+  const small = await start(t, { tier: 'small' });
+  await writeFile(resolve(small.dir, 'spec.md'), uiSpec());
+  await writeFile(resolve(small.dir, 'task.md'), '# T\n## Plan\n- S1: x — files: a — covers: AC-1 — test: t\n');
+  assert.deepEqual(agentsOf(next(small.project, small.name)), ['peos:implementer']);
+  assert.deepEqual(JSON.parse(await readFile(resolve(small.dir, 'state.json'))).gates, {});
+});
+
+test('a changed design changes every step digest', () => {
+  const plan = '## Steps\n\n### S1 — a\n- Covers: AC-1\n';
+  const spec = '- AC-1: a\n';
+  assert.notEqual(planDigest(plan, spec, 'arch\0design v1').steps.S1, planDigest(plan, spec, 'arch\0design v2').steps.S1);
+});
+
+test('the preview is part of the design, and changed upstream artifacts invalidate later evaluations', async t => {
+  const { project, name, dir } = await start(t, { tier: 'standard' });
+  await writeFile(resolve(dir, 'idea.md'), 'Add a reports screen.');
+  next(project, name);
+  await writeFile(resolve(dir, 'spec.md'), uiSpec());
+  await report(dir, 'spec', { evaluator: 'spec', verdict: 'PASS', subject: next(project, name).agents[0].inputs.subject });
+  next(project, name);
+  await writeFile(resolve(dir, 'design.md'), '# Design\n');
+  await writeFile(resolve(dir, 'design-preview.html'), '<link href="https://fonts.example/x.css">');
+  const first = next(project, name);
+  await report(dir, 'plan-design', { evaluator: 'plan', focus: 'design', verdict: 'FAIL', subject: first.agents[0].inputs.subject, findings: [finding('the preview loads a web font')] });
+  assert.deepEqual(agentsOf(next(project, name)), ['peos:designer']);
+  // A fix to the preview alone is a new design for the evaluator.
+  await writeFile(resolve(dir, 'design-preview.html'), '<p>preview</p>');
+  const again = next(project, name);
+  assert.deepEqual(agentsOf(again), ['peos:eval-plan']);
+  assert.notEqual(again.agents[0].inputs.subject, first.agents[0].inputs.subject);
+  await report(dir, 'plan-design', { evaluator: 'plan', focus: 'design', verdict: 'PASS', subject: again.agents[0].inputs.subject });
+  next(project, name);
+  await writeFile(resolve(dir, 'plan.md'), '# Plan\n\n## Steps\n\n### S1 — screen\n- Covers: AC-1, AC-2\n');
+  await report(dir, 'plan', { evaluator: 'plan', verdict: 'PASS', subject: next(project, name).agents[0].inputs.subject });
+  assert.equal(next(project, name).do, 'gate');
+  // A new design version makes the plan's evaluation stale.
+  await writeFile(resolve(dir, 'design.md'), '# Design\n## Screens\n### Settings\n');
+  const designEval = next(project, name);
+  await report(dir, 'plan-design', { evaluator: 'plan', focus: 'design', verdict: 'PASS', subject: designEval.agents[0].inputs.subject });
+  const planEval = next(project, name);
+  assert.deepEqual([agentsOf(planEval).join(), planEval.agents[0].inputs.focus], ['peos:eval-plan', undefined]);
+  // A changed spec makes both the design and plan evaluations stale.
+  await writeFile(resolve(dir, 'spec.md'), uiSpec() + '- AC-3: c\n');
+  const specEval = next(project, name);
+  await report(dir, 'spec', { evaluator: 'spec', verdict: 'PASS', subject: specEval.agents[0].inputs.subject });
+  const after = next(project, name);
+  assert.equal(after.agents[0].inputs.focus, 'design');
+  const state = JSON.parse(await readFile(resolve(dir, 'state.json')));
+  assert.deepEqual([state.evals['plan-design'], state.evals.plan], [undefined, undefined]);
 });

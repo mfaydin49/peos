@@ -62,6 +62,8 @@ test('approval-capture turns only a whole decision command into a grant', async 
   }
   hook('approval-capture', project, { prompt: '/peos:revise plan --run avatar Move CLI tests to their own file.' });
   assert.deepEqual([(await grant()).action, (await grant()).target, (await grant()).run], ['revise', 'plan', name]);
+  hook('approval-capture', project, { prompt: '/peos:revise design make it darker' });
+  assert.deepEqual([(await grant()).action, (await grant()).target], ['revise', 'design']);
   hook('approval-capture', project, { prompt: '/peos:retry code-all' });
   assert.deepEqual([(await grant()).action, (await grant()).target, (await grant()).run], ['reset-eval', 'code-all', name], 'bound to the active run');
   hook('approval-capture', project, { prompt: '/peos:approve' });
@@ -103,6 +105,11 @@ test('state-guard denies writes to run state, evidence and decisions, and allows
   assert.ok(denied(agentWrite('peos:spec-writer', resolve(directory, 'state.json'))));
   assert.equal(agentWrite('peos:architect', resolve(directory, 'architecture.md')), null, 'the architect writes its own artifact');
   assert.ok(denied(agentWrite('peos:architect', resolve(directory, 'plan.md'))));
+  assert.equal(agentWrite('peos:designer', resolve(directory, 'design.md')), null, 'the designer writes its design');
+  assert.equal(agentWrite('peos:designer', resolve(directory, 'design-preview.html')), null, 'and its preview');
+  assert.ok(denied(agentWrite('peos:designer', resolve(directory, 'plan.md'))));
+  assert.ok(denied(agentWrite('peos:designer', resolve(project, 'preview.html'))));
+  assert.equal(agentWrite('peos:eval-plan', resolve(directory, 'pending-eval-plan-design.json')), null, 'the design report');
   assert.equal(agentWrite('peos:eval-code', resolve(directory, 'pending-eval-code.json')), null, 'its report');
   assert.ok(denied(agentWrite('peos:eval-code', resolve(directory, 'spec.md'))));
   assert.ok(denied(agentWrite('peos:eval-code', resolve(directory, 'evals/code-all.json'))));

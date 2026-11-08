@@ -117,6 +117,9 @@ answers.
    After the last, the run enters the release stage and `summary.md` is written
    (`write`), then `finished`.
 
+A spec that says `Design: new` under "User interface" adds a `design` gate between the
+architecture and the plan ([design-gate.md](design-gate.md)).
+
 Evaluations in step 7 judge only the change since their last report when they have one
 (`basis: delta`), and a passed evaluation is carried over a change that needs no
 evaluator ([eval-economy.md](eval-economy.md)).

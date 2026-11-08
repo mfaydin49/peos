@@ -9,9 +9,9 @@ Projects retain their architecture, technology, design system, domain policy,
 check commands, budgets, approvals, task records and decisions. The toolkit supplies
 routing, four focused stage skills, rule documents, project and run templates, schemas,
 and four local scripts. It is also a Claude Code plugin preview (below) with entry
-skills, ten agents (project profile, investigation, spec, architecture, plan, implementation and four evaluators) and hooks that
+skills, eleven agents (project profile, investigation, spec, architecture, design, plan, implementation and four evaluators) and hooks that
 protect run state and human gate decisions. The direction is specified in the [v2 design](docs/design/peos-v2-plugin.md);
-increments 1–5 and 7a are implemented: request → spec → (architecture) → plan → implementation →
+increments 1–5 and 7a–7d are implemented: request → spec → (architecture) → (design) → plan → implementation →
 checks → independent code and security evaluation → release stage, for every tier from a
 one-line fix to a new application built milestone by milestone, with extra
 behavior-preservation rules for refactor runs and deterministic quality guardrails
@@ -94,13 +94,18 @@ request:
 | --- | --- | --- |
 | `trivial` | One file, a few lines | None |
 | `small` | One concern, about 5 files, no user-level choice | None |
-| `standard` | A real user-level choice, or a change to a trust boundary | One `/peos:approve` after the spec and plan both pass evaluation |
-| `large` | New application, several components or open questions | `/peos:approve spec`, `/peos:approve architecture` and `/peos:approve plan`, each after its evaluation passes |
+| `standard` | A real user-level choice, or a change to a trust boundary | One `/peos:approve` after the spec, the design (when there is one) and the plan pass evaluation |
+| `large` | New application, several components or open questions | `/peos:approve spec`, `/peos:approve architecture`, `/peos:approve design` (when there is one) and `/peos:approve plan`, each after its evaluation passes |
 
 A `large` run adds an architecture (stack, components, data, every new dependency) and
 splits the plan into milestones; each milestone is implemented, checked and evaluated
 before the next starts. Approving the architecture is your consent to install the
 dependencies it lists, and only those.
+
+A spec that introduces new screens says `Design: new` under "User interface"; the run
+then gets a design ([design](docs/design/design-gate.md)): tokens, components, every
+screen with its states, and `design-preview.html` to open in a browser before any code
+is written. The implementer builds the screens from those tokens.
 
 The run's control flow is in `peos-run next` ([design](docs/design/peos-next.md)): it
 decides the next agent, check or gate from the recorded state, so the orchestrator only
