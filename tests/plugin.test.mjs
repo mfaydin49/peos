@@ -32,15 +32,15 @@ test('plugin and marketplace manifests agree with the package', async () => {
 });
 
 test('agents are named after their file, cannot delegate, and only the implementer edits code or runs commands', async () => {
-  assert.deepEqual(agentFiles.sort(), ['architect.md', 'designer.md', 'eval-code.md', 'eval-plan.md', 'eval-security.md', 'eval-spec.md', 'eval-ui.md', 'implementer.md', 'investigator.md', 'planner.md', 'profiler.md', 'spec-writer.md']);
+  assert.deepEqual(agentFiles.sort(), ['architect.md', 'designer.md', 'eval-code.md', 'eval-design.md', 'eval-plan.md', 'eval-security.md', 'eval-spec.md', 'eval-ui.md', 'implementer.md', 'investigator.md', 'planner.md', 'profiler.md', 'spec-writer.md']);
   for (const name of agentFiles) {
     const { fields } = await document(resolve(toolkit, 'agents', name));
     assert.equal(fields.name, name.replace(/\.md$/, ''));
     assert.ok(fields.description && fields.model, `${name}: description and model`);
     assert.ok(list(fields.disallowedTools).includes('Agent'), `${name}: no nested delegation`);
-    // The UI evaluator inherits the host's browser tools, which state-guard limits to the
-    // run's preview; the tools it must never have are denied by name.
-    if (name === 'eval-ui.md') {
+    // The UI and design evaluators inherit the host's browser tools, which state-guard limits
+    // to the run's preview; the tools they must never have are denied by name.
+    if (['eval-ui.md', 'eval-design.md'].includes(name)) {
       assert.equal(fields.tools, undefined);
       for (const forbidden of ['Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'WebFetch', 'WebSearch']) assert.ok(list(fields.disallowedTools).includes(forbidden), `${name}: ${forbidden}`);
       continue;

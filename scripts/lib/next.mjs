@@ -10,13 +10,13 @@ import { loadConfig } from './config.mjs';
 import { digest, signature } from './eval-report.mjs';
 import { headCommit } from './git.mjs';
 import { codeMapPath } from './map.mjs';
-import { designRequested, gateArtifacts, gateEvalKeys, gateOrder, readRunFile } from './run-state.mjs';
+import { decisionGroup, designRequested, gateArtifacts, gateEvalKeys, gateOrder, readRunFile } from './run-state.mjs';
 import { runningPreview } from './ui.mjs';
 
 const toolkit = fileURLToPath(new URL('../../', import.meta.url));
 const template = name => resolve(toolkit, 'templates/run', name);
 const producers = { spec: 'peos:spec-writer', architecture: 'peos:architect', design: 'peos:designer', plan: 'peos:planner' };
-const gateEvaluators = { spec: 'peos:eval-spec', architecture: 'peos:eval-plan', design: 'peos:eval-plan', plan: 'peos:eval-plan' };
+const gateEvaluators = { spec: 'peos:eval-spec', architecture: 'peos:eval-plan', design: 'peos:eval-design', plan: 'peos:eval-plan' };
 const gateStages = ['intake', ...gateOrder];
 const codeStages = ['implement', 'verify', 'evaluate'];
 const pendingReport = /^pending-eval-([a-z0-9-]+)\.json$/;
@@ -166,15 +166,17 @@ async function decide(project, context, { options, errors, h }) {
     }
   }
 
-  // Gates, in order. A standard run passes its spec and design on a PASS and decides them
-  // with the plan at the plan gate.
+  // Gates, in order. A gate that is not the last of its decision group passes on a PASS
+  // and is decided with the group's last gate: everything with the plan on a standard
+  // run; spec, architecture and design together, then the plan, on a large run.
   for (const gate of gateOrder.filter(name => Object.hasOwn(state.gates, name))) {
     if (assessment.gates[gate].fresh) continue;
     const key = gateEvalKeys[gate];
     const evaluation = assessment.evals[key];
     const hash = artifacts[gate];
     const revising = state.gates[gate].status === 'revision_requested' && (hash === null || state.gates[gate].artifactHash === hash);
-    if (state.tier === 'standard' && gate !== 'plan' && !revising && evaluation?.fresh && evaluation.verdict === 'PASS') continue;
+    const group = decisionGroup(state, gate);
+    if (gate !== group.at(-1) && !revising && evaluation?.fresh && evaluation.verdict === 'PASS') continue;
     if (state.stage !== gate) return advance(gate);
     if (gate === 'plan' && (await h.map(project)).changed) return { applied: 'code map' };
     const output = path(gateArtifacts[gate]);
@@ -202,7 +204,9 @@ async function decide(project, context, { options, errors, h }) {
       const evaluatorInputs = {
         spec: { spec: output, request: idea ?? investigation },
         architecture: { focus: 'architecture', architecture: output, spec: path('spec.md'), request: idea, investigation },
-        design: { focus: 'design', design: output, preview, spec: path('spec.md'), architecture },
+        // The design is judged as rendered: peos-run serves the preview file for the evaluator.
+        design: gate !== 'design' ? null : { design: output, preview, 'preview url': (await h.serveDesign(project, { run })).url ?? 'unavailable: judge design.md and the preview source, and report mode degraded',
+          spec: path('spec.md'), architecture, 'design references': config?.references.design?.length ? config.references.design : undefined },
         plan: { plan: output, spec: path('spec.md'), architecture, design, investigation, 'code map': mapPath }
       }[gate];
       return { do: 'spawn', then: 'next', agents: [{ agent: gateEvaluators[gate], inputs: { ...evaluatorInputs, profile, subject: hash, report,
@@ -217,10 +221,11 @@ async function decide(project, context, { options, errors, h }) {
       const report = await readJson(directory, `evals/${key}.json`);
       return producer({ findings: report ? digest(report).blocking : 'see the recorded evaluation', 'unmet criteria': report ? digest(report).unmetCriteria : [] });
     }
-    const decided = state.tier === 'standard' ? gateOrder.filter(name => Object.hasOwn(state.gates, name)) : [gate];
+    const decided = group.filter(name => !assessment.gates[name].fresh);
+    const shown = decided.includes('design') && await exists(preview);
     return { do: 'gate', gates: decided,
-      artifacts: [...decided.map(name => path(gateArtifacts[name])), ...(decided.includes('design') && await exists(preview) ? [preview] : [])],
-      message: `Approve with /peos:approve${state.tier === 'standard' ? '' : ` ${gate}`}, or request changes with /peos:revise ${state.tier === 'standard' ? `<${decided.join('|')}>` : gate} <feedback>.${decided.includes('design') && await exists(preview) ? ` Open ${preview} in a browser to see the design.` : ''}` };
+      artifacts: [...decided.map(name => path(gateArtifacts[name])), ...(shown ? [preview] : [])],
+      message: `Approve with /peos:approve${decided.length > 1 ? '' : ` ${gate}`}, or request changes with /peos:revise ${decided.length > 1 ? `<${decided.join('|')}>` : gate} <feedback>.${decided.includes('architecture') ? ' Approving also consents to installing the dependencies the architecture lists, and only those.' : ''}${shown ? ` Open ${preview} in a browser to see the design.` : ''}` };
   }
 
   // Implementation. Small tiers plan inline in task.md.

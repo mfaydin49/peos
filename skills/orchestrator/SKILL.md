@@ -24,7 +24,7 @@ judge. Design: ${CLAUDE_PLUGIN_ROOT}/docs/design/peos-next.md.
   not look for another way.
 - Spawn only `peos:profiler`, `peos:investigator`, `peos:spec-writer`, `peos:architect`,
   `peos:designer`, `peos:planner`, `peos:implementer`, `peos:eval-spec`, `peos:eval-plan`,
-  `peos:eval-code`, `peos:eval-security`, `peos:eval-ui`. Collect every result before you end your turn;
+  `peos:eval-design`, `peos:eval-code`, `peos:eval-security`, `peos:eval-ui`. Collect every result before you end your turn;
   if the host runs an agent in the background, wait for its hand-back silently. A spawn
   that fails because a `peos:*` agent is not found, or an agent missing a tool its
   definition names, means this session loaded an older plugin: stop and tell the user
@@ -85,14 +85,22 @@ Before every new run and for `/peos:init`:
 3. For a `fix` without evidence where the investigator's root cause is "not
    established", ask once for it, with the read-only command the investigator suggests,
    and spawn the investigator again. You never access production yourself.
-4. `peos-run init --name <short-hyphenated-name> --type <type> --tier <tier>`. In its
+4. Ask once, here, so that no later stage has to. Collect the choices only the user can
+   make: the investigator's `Open` line and, when the request names none, the platform
+   of a new application and the visual direction of new screens (a style, brand colors,
+   or a product whose look the user likes). Drop every choice the request, the profile,
+   the project's instructions or the code answers, and every reversible detail: those
+   are decided by the agents and shown at the gate. Ask what is left in one question
+   round, at most four; most `trivial`, `small` and `fix` runs ask nothing.
+5. `peos-run init --name <short-hyphenated-name> --type <type> --tier <tier>`. In its
    `directory`: for `standard` and `large`, write `idea.md` with the user's request and
-   evidence word for word (no secrets or personal data) and `investigation.md` with the
+   evidence word for word (no secrets or personal data), the answers of step 4 under
+   `## Answers` (question and answer, one line each), and `investigation.md` with the
    investigator's report word for word; for `trivial` and `small`, write `task.md` from
    `${CLAUDE_PLUGIN_ROOT}/templates/run/task.md` and the report, with its inline plan
-   step `S1` and only task-phase check IDs under Verification. Headings stay in English,
-   content in the output language.
-5. Continue with section 2 in the same turn.
+   step `S1`, the answers under Decisions and only task-phase check IDs under
+   Verification. Headings stay in English, content in the output language.
+6. Continue with section 2 in the same turn.
 
 ## 2. Loop
 
@@ -104,7 +112,7 @@ Call `peos-run next --run <run>` and act on its `do`; repeat until an action end
 | `spawn` | Spawn every agent in `agents` together, each with its `model` when given, giving it each entry of `inputs` as one line (`name: value`) and nothing else from this conversation, except: the user's answers or `/peos:revise` feedback when `inputs.revision` asks for them. Then do what `then` says. |
 | `run` | Run that `peos-run` action with its `args` and a Bash timeout of `timeoutMs`, then call `next`. A `PREVIEW` error stops the run: tell the user the local preview did not start and why. |
 | `write` | Write `artifact` from `template` and `sources` as `message` says, then call `next`. For `summary.md`, read the code evaluation reports in `sources.evaluations` with the Read tool for the acceptance evidence. |
-| `gate` | Show the producers' summary lines (at most about eight lines) and the artifact paths (a design preview as a clickable link), then end the turn with `message`. |
+| `gate` | One decision covers every gate in `gates`. Show the producers' summary lines (at most about eight lines; with an architecture, the dependencies it installs by name) and the artifact paths (a design preview as a clickable link), then end the turn with `message`. |
 | `limit` | Show the `blocking` findings in short and `message`; end the turn. |
 | `blocked` | Say what could not be assessed (`notAssessed`) and ask the user how to continue. |
 | `stop` | Tell the user `message` in your words; end the turn. |
@@ -112,9 +120,11 @@ Call `peos-run next --run <run>` and act on its `do`; repeat until an action end
 
 Agents answer with a status line:
 
-- A producer's `STATUS: QUESTIONS`: drop the questions the project or the evidence
-  answers, ask the rest in one round, then spawn the same producer again with the same
-  inputs plus the answers. `STATUS: DRAFT`: keep its summary lines for the gate message.
+- A producer's `STATUS: QUESTIONS` is the exception after intake: drop the questions
+  the project, the evidence or `## Answers` answers and those with a reversible default
+  (tell the producer to take its recommendation), ask the rest in one round, add the
+  answers to `## Answers` in `idea.md`, then spawn the same producer again with the
+  same inputs plus the answers. `STATUS: DRAFT`: keep its summary lines for the gate message.
 - An implementer's `STEP Sn: DONE` blocks: call `next --done <those step IDs, comma-separated>`.
   `BLOCKED`: stop and put the decision to the user. On a fix round, call `next`.
 - When `inputs.note` on an implementer says so, and every blocking finding only lacks

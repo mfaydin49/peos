@@ -2,7 +2,7 @@ import { fail } from './cli.mjs';
 import { referencePattern } from './config.mjs';
 
 // Mirrors schemas/eval-report.schema.json; tests check both agree on fixtures.
-const evaluators = ['spec', 'plan', 'code', 'security', 'ui', 'performance'];
+const evaluators = ['spec', 'plan', 'design', 'code', 'security', 'ui', 'performance'];
 const filePattern = new RegExp(referencePattern);
 function invalid(where, reason) { fail('EVAL_REPORT', `${where}: ${reason}`); }
 function object(value, allowed, required, where) {
@@ -23,16 +23,16 @@ export function validateEvalReport(input) {
   oneOf(input.evaluator, evaluators, 'evaluator');
   oneOf(input.verdict, ['PASS', 'FAIL', 'BLOCKED'], 'verdict');
   oneOf(input.mode, ['full', 'degraded'], 'mode');
-  const artifact = ['spec', 'plan'].includes(input.evaluator);
+  const artifact = ['spec', 'plan', 'design'].includes(input.evaluator);
   if (typeof input.subject !== 'string' || !(artifact ? /^sha256:[0-9a-f]{64}$/ : /^fp:[0-9a-f]{64}$/).test(input.subject)) {
-    invalid('subject', artifact ? 'spec and plan evaluations judge an artifact (sha256:<hex>)' : 'code evaluations judge a code state (fp:<hex>)');
+    invalid('subject', artifact ? 'spec, plan and design evaluations judge an artifact (sha256:<hex>)' : 'code evaluations judge a code state (fp:<hex>)');
   }
   const hasFocus = Object.hasOwn(input, 'focus');
   if (input.evaluator === 'code') {
     if (!hasFocus) invalid('focus', 'required for the code evaluator');
     oneOf(input.focus, ['acceptance', 'quality', 'tests', 'all'], 'focus');
   } else if (input.evaluator === 'plan') {
-    if (hasFocus) oneOf(input.focus, ['architecture', 'design'], 'focus');
+    if (hasFocus) oneOf(input.focus, ['architecture'], 'focus');
   } else if (hasFocus) invalid('focus', 'not allowed for this evaluator');
   if (!Array.isArray(input.criteria)) invalid('criteria', 'expected an array');
   for (const [index, entry] of input.criteria.entries()) {

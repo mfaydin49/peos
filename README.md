@@ -9,7 +9,7 @@ Projects retain their architecture, technology, design system, domain policy,
 check commands, budgets, approvals, task records and decisions. The toolkit supplies
 routing, four focused stage skills, rule documents, project and run templates, schemas,
 and four local scripts. It is also a Claude Code plugin preview (below) with entry
-skills, twelve agents (project profile, investigation, spec, architecture, design, plan, implementation and five evaluators) and hooks that
+skills, thirteen agents (project profile, investigation, spec, architecture, design, plan, implementation and six evaluators) and hooks that
 protect run state and human gate decisions. The direction is specified in the [v2 design](docs/design/peos-v2-plugin.md);
 increments 1–5 and 7a–7e are implemented: request → spec → (architecture) → (design) → plan → implementation →
 checks → independent code, security and UI evaluation → release stage, for every tier from a
@@ -95,29 +95,46 @@ request:
 | `trivial` | One file, a few lines | None |
 | `small` | One concern, about 5 files, no user-level choice | None |
 | `standard` | A real user-level choice, or a change to a trust boundary | One `/peos:approve` after the spec, the design (when there is one) and the plan pass evaluation |
-| `large` | New application, several components or open questions | `/peos:approve spec`, `/peos:approve architecture`, `/peos:approve design` (when there is one) and `/peos:approve plan`, each after its evaluation passes |
+| `large` | New application, several components or open questions | Two: `/peos:approve` once for the direction (spec, architecture and, when there is one, design, after each passed evaluation), then `/peos:approve` for the plan |
 
 A `large` run adds an architecture (stack, components, data, every new dependency) and
 splits the plan into milestones; each milestone is implemented, checked and evaluated
 before the next starts. Approving the architecture is your consent to install the
-dependencies it lists, and only those.
+dependencies it lists, and only those. The architecture also fixes the folder
+structure, which module may depend on which, and how each such rule is enforced (by
+the compiler or by a lint rule); a new application's first milestone declares its
+test, lint, typecheck and format commands, and PEOS runs them as checks from then on.
+
+Questions come once: before the run starts, the orchestrator asks what only you can
+decide (at most four questions, usually none for a fix) and records the answers in
+`idea.md`. Later stages decide reversible details themselves and show them at the gate.
 
 A spec that introduces new screens says `Design: new` under "User interface"; the run
 then gets a design ([design](docs/design/design-gate.md)): tokens, components, every
 screen with its states, and `design-preview.html` to open in a browser before any code
-is written. The implementer builds the screens from those tokens.
+is written. The designer follows the craft rules in `rules/design-craft.md`, and
+`eval-design` looks at the preview rendered (`peos-run` serves the file on a loopback
+port) and sends it back when it shows a broken layout, filler content or the signs of
+a generated interface. The implementer builds the screens from those tokens.
 
 A change that touches the interface (markup, styles, native views, assets, strings) is
 also judged on screen by `eval-ui` ([design](docs/design/eval-ui.md)), from one of two
 sources in `.project-os/engineering.config.json`: a check of kind `ui-capture` (your
 UI test writes screenshots and a `manifest.json` into `$PEOS_UI_DIR`; the way for iOS
 and Android) or a `preview` (a local dev server on a loopback URL that `peos-run`
-starts, which `eval-ui` opens with the host's browser tools). Without either, the
+starts, which `eval-ui` opens with the host's browser tools). Setup writes the
+`preview` itself when your `dev`, `start` or `preview` script pins its port
+(`vite --port 5173 --strictPort`), and a `ui-capture` check for a `ui:capture` script;
+a new application's architecture has to name one of the two. Without either, the
 summary says plainly that the interface was not verified.
 
 The run's control flow is in `peos-run next` ([design](docs/design/peos-next.md)): it
 decides the next agent, check or gate from the recorded state, so the orchestrator only
 carries it out and a resumed run continues exactly where it stopped.
+
+`/peos:status <run>` shows the run's token use against its tier budget and per agent,
+so a costly stage is visible. To see whether a change to PEOS itself made runs better
+or only different, run the [reference tasks](benchmarks/README.md) before and after it.
 
 ### Start a new application
 
@@ -134,8 +151,7 @@ and a root test command; PEOS derives the checks from them, never writes them it
 and then describes the new project for later agents. Run install again after that
 milestone to connect Codex and Copilot.
 
-The agent asks a question only when the choice is yours. Implementation, checks and
-evaluation then run on their own. A run ends at the release stage with a summary in
+Implementation, checks and evaluation run on their own. A run ends at the release stage with a summary in
 `.project-os/runs/<run>/summary.md`.
 
 Nothing is committed, pushed, deployed or migrated for you: the change stays in your

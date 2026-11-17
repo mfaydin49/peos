@@ -236,6 +236,13 @@ test('state-guard gives MCP tools only to eval-ui, only browser tools, only on t
   assert.equal(guard('peos:eval-ui', 'mcp__Claude_Browser__navigate', { url: 'http://localhost:5173/list?state=empty' }), 'allow');
   assert.equal(guard('peos:eval-ui', 'mcp__Claude_Browser__computer', { action: 'screenshot' }), 'allow');
   assert.equal(guard('peos:eval-ui', 'mcp__Claude_Browser__navigate', { url: 'localhost:5173/' }), 'allow');
+  // The design evaluator looks at the served design preview under the same limits.
+  assert.equal(guard('peos:eval-design', 'mcp__Claude_Browser__navigate', { url: 'http://localhost:5173/' }), 'allow');
+  assert.equal(guard('peos:eval-design', 'mcp__Claude_Browser__resize_window', { width: 390, height: 844 }), 'allow');
+  assert.equal(guard('peos:eval-design', 'mcp__Claude_Browser__read_console_messages', {}), 'allow');
+  assert.equal(guard('peos:eval-design', 'mcp__Claude_Browser__navigate', { url: 'https://example.com' }), 'deny');
+  assert.equal(guard('peos:eval-design', 'mcp__Claude_Browser__javascript_tool', { text: 'x' }), 'deny');
+  assert.equal(guard('peos:eval-plan', 'mcp__Claude_Browser__navigate', { url: 'http://localhost:5173/' }), 'deny', 'no other agent browses');
   assert.equal(guard('peos:eval-ui', 'mcp__playwright__browser_take_screenshot', {}), 'allow');
   assert.equal(guard('peos:eval-ui', 'mcp__claude-in-chrome__read_page', { tabId: 1 }), 'deny', 'the user\'s own Chrome is never used');
   assert.equal(guard('peos:eval-ui', 'mcp__Claude_Browser__computer', { action: 'type', text: 'x' }), 'deny');

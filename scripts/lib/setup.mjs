@@ -23,9 +23,10 @@ async function text(project, path) {
 }
 const check = (id, executable, args, phases, kind, timeoutMs = 600000) => ({ id, executable, args, phases, required: true, timeoutMs, kind });
 
-async function nodeChecks(project) {
+// The root package.json's scripts and the package manager that runs them.
+async function nodeProject(project) {
   const source = await text(project, 'package.json');
-  if (source === null) return [];
+  if (source === null) return null;
   let manifest;
   try { manifest = JSON.parse(source); } catch { fail('SETUP', 'package.json is not valid JSON.'); }
   const scripts = manifest.scripts && typeof manifest.scripts === 'object' ? manifest.scripts : {};
@@ -34,6 +35,24 @@ async function nodeChecks(project) {
   let manager = declared && ['npm', 'pnpm', 'yarn', 'bun'].includes(declared) ? declared : null;
   for (const [lock, name] of locks) if (!manager && await exists(project, lock)) manager = name;
   manager ??= 'npm';
+  return { scripts, manager };
+}
+// The local preview the UI evaluator looks at (eval-ui.md §5.1), when the manifest says
+// where it listens: a `dev`, `start` or `preview` script that pins its port
+// (`--port 5173`, `-p 3000`). A port the script leaves to its tool's default is not
+// guessed; the project then has no preview until its script names one.
+export async function detectPreview(project) {
+  const node = await nodeProject(project);
+  for (const name of node ? ['dev', 'start', 'preview'] : []) {
+    const port = typeof node.scripts[name] === 'string' ? /(?:^|\s)(?:--port[=\s]|-p\s)(\d{2,5})(?=\s|$)/.exec(node.scripts[name])?.[1] : null;
+    if (port && Number(port) >= 1024 && Number(port) <= 65535) return { executable: node.manager, args: ['run', name], url: `http://localhost:${port}`, timeoutMs: 60000 };
+  }
+  return null;
+}
+async function nodeChecks(project) {
+  const node = await nodeProject(project);
+  if (!node) return [];
+  const { scripts, manager } = node;
   const usable = name => typeof scripts[name] === 'string' && !/no test specified/.test(scripts[name]);
   const first = names => names.find(usable);
   const checks = [];
@@ -46,6 +65,8 @@ async function nodeChecks(project) {
   add('lint', ['lint'], ['task', 'release'], 'lint', 300000);
   add('format', ['check-format', 'format:check', 'format-check'], ['task', 'release'], 'other', 300000);
   add('docs', ['docs:check', 'check:docs'], ['task', 'release'], 'other', 300000);
+  // A UI test that writes screenshots and manifest.json into $PEOS_UI_DIR (eval-ui.md §5.2).
+  add('ui-capture', ['ui:capture', 'capture:ui'], ['task'], 'ui-capture');
   add('build', ['build'], ['release'], 'build');
   return checks;
 }
@@ -143,11 +164,13 @@ export async function setupProject(project) {
         instructions, profile: { path: resolve(project, profilePath), head, ...await profileStatus(project) } };
     }
     if (!checks.length) fail('SETUP', `No test command could be detected from the root manifests (workspace packages and nested projects are not searched). Add a root test script or write ${configPath} by hand (see the toolkit's templates/engineering.config.json).`);
+    const detected = await detectPreview(project);
     const created = validateConfig({
       schemaVersion: 1, projectName: await projectName(project), outputLanguage: 'tr',
       // AGENTS.md is listed even when missing: setup is followed by creating it.
       references: { instructions: ['AGENTS.md', ...(await exists(project, 'CLAUDE.md') ? ['CLAUDE.md'] : [])], architecture: [], design: [] },
       checks,
+      ...(detected ? { preview: detected } : {}),
       manualChecks: [{ id: 'release-environment', description: 'Confirm the target environment and required migration, visual, and performance evidence against project policy; record justified non-applicability.', phases: ['release'], required: true }]
     });
     const directory = await lstat(resolve(project, '.project-os')).catch(() => null);
@@ -161,14 +184,18 @@ export async function setupProject(project) {
   const promoted = await checksToPromote(project, current);
   const changes = [...missing, ...promoted];
   const label = entry => `${entry.id}: ${[entry.executable, ...entry.args].join(' ')}`;
-  const add = changes.length > 0 && !await runInProgress(project);
+  // An existing configuration without a preview gets the one its manifest now declares.
+  const preview = current.preview ? null : await detectPreview(project);
+  const add = (changes.length > 0 || preview) && !await runInProgress(project);
   if (add) {
     const checks = current.checks.map(entry => promoted.includes(entry) ? { ...entry, phases: ['task', ...entry.phases] } : entry);
-    await writeJsonAtomic(resolve(project, configPath), validateConfig({ ...JSON.parse(await text(project, configPath)), checks: [...checks, ...missing] }));
+    await writeJsonAtomic(resolve(project, configPath), validateConfig({ ...JSON.parse(await text(project, configPath)), checks: [...checks, ...missing], ...(preview ? { preview } : {}) }));
     if (config === 'existing') config = 'updated';
   }
+  const shown = (await loadConfig(project)).preview;
   const instructions = Object.fromEntries(await Promise.all(instructionFiles.map(async path => [path, await exists(project, path) ? 'present' : 'missing'])));
   if (instructions['AGENTS.md'] === 'present' && instructions['CLAUDE.md'] === 'missing') instructions['CLAUDE.md'] = await linkInstructions(project);
   return { config, configPath: resolve(project, configPath), addedChecks: add ? changes.map(label) : [], suggestedChecks: add ? [] : changes.map(label), checks: (await loadConfig(project)).checks.map(entry => `${entry.id}: ${[entry.executable, ...entry.args].join(' ')}`),
+    preview: shown ? `${[shown.executable, ...shown.args].join(' ')} at ${shown.url}` : null,
     instructions, profile: { path: resolve(project, profilePath), head, ...await profileStatus(project) } };
 }

@@ -318,7 +318,7 @@ test('finish stops at verify and names the failing checks', async t => {
   assert.equal(run(project, 'status', ['--run', name]).report.state.stage, 'verify');
 });
 
-test('a large run still decides each gate on its own', async t => {
+test('a large run does not plan before its direction is decided', async t => {
   const { project, name } = await start(t, 'large');
   await writeFile(resolve(runDir(project, name), 'spec.md'), 'spec');
   await submit(t, project, name, { evaluator: 'spec', verdict: 'PASS', subject: `sha256:${sha('spec')}` });
@@ -350,18 +350,45 @@ test('changes writes the run diff and reports deterministic security triggers', 
   run(project, 'advance', ['--run', name, '--to', 'implement']);
   let report = run(project, 'changes', ['--run', name]).report;
   assert.deepEqual(report.securityTriggers, []);
-  await writeFile(resolve(project, 'base.txt'), 'base\nconst token = jwt.sign(payload, secret);\n');
-  await writeFile(resolve(project, 'reader.js'), "import fs from 'node:fs';\nexport const read = () => fs.readFileSync(process.argv[2]);\n");
+  await writeFile(resolve(project, 'base.txt'), 'base\nchanged\n');
+  await writeFile(resolve(project, 'reader.js'), "import fs from 'node:fs';\nexport const read = () => fs.readFileSync(process.argv[2]);\nconst token = jwt.sign(payload, secret);\n");
   await writeFile(resolve(dir, 'notes.md'), 'jwt.sign in run files is ignored');
   report = run(project, 'changes', ['--run', name]).report;
-  // The fixture's untracked configuration is a change too; only run files are excluded.
-  assert.deepEqual(report.files.map(file => [file.status, file.path]), [['M', 'base.txt'], ['?', '.project-os/engineering.config.json'], ['?', 'reader.js']]);
+  // PEOS's own files (the fixture's untracked configuration, run files) are not the change.
+  assert.deepEqual(report.files.map(file => [file.status, file.path]), [['M', 'base.txt'], ['?', 'reader.js']]);
   assert.deepEqual(report.securityTriggers, ['authentication', 'cryptography', 'file-system', 'secrets', 'user-input']);
   const diff = await readFile(report.diffPath, 'utf8');
   assert.match(diff, /\+const token = jwt\.sign/);
+  assert.match(diff, /^\+changed$/m);
   assert.match(diff, /\+\+\+ b\/"reader\.js" \(untracked\)/);
   assert.doesNotMatch(diff, /notes\.md/);
   assert.equal(report.codeState, run(project, 'fingerprint').report.codeState);
+});
+
+test('what the working tree held when implementation started is not the run\'s change, and prose triggers nothing', async t => {
+  const { project, name } = await start(t, 'small');
+  // Setup files and the user's own uncommitted work, present before the run implements.
+  await writeFile(resolve(project, 'AGENTS.md'), '# Rules\n- No auth, no password storage.\n');
+  await writeFile(resolve(project, 'wip.js'), 'export const draft = jwt.sign(payload, secret);\n');
+  await writeFile(resolve(project, 'base.txt'), 'base\nedited before the run\n');
+  run(project, 'advance', ['--run', name, '--to', 'implement']);
+  assert.match(run(project, 'status', ['--run', name]).report.state.baseTree, /^[0-9a-f]{40}/);
+  assert.deepEqual(run(project, 'changes', ['--run', name]).report.files, [], 'nothing changed since the run started');
+  await writeFile(resolve(project, 'feature.js'), 'export const add = (a, b) => a + b;\n');
+  await writeFile(resolve(project, 'NOTES.md'), 'Login and password handling are out of scope.\n');
+  await writeFile(resolve(project, 'base.txt'), 'base\nedited before the run\nand by the run\n');
+  const report = run(project, 'changes', ['--run', name]).report;
+  assert.deepEqual(report.files.map(file => file.path).sort(), ['NOTES.md', 'base.txt', 'feature.js']);
+  assert.deepEqual(report.securityTriggers, [], 'words in a document are not a security change');
+  const diff = await readFile(report.diffPath, 'utf8');
+  assert.doesNotMatch(diff, /wip\.js|AGENTS\.md/);
+  assert.match(diff, /\+and by the run/);
+  // A run recorded without a snapshot keeps the earlier behavior.
+  const dir = runDir(project, name);
+  const state = JSON.parse(await readFile(resolve(dir, 'state.json'), 'utf8'));
+  delete state.baseTree;
+  await writeFile(resolve(dir, 'state.json'), JSON.stringify(state));
+  assert.ok(run(project, 'changes', ['--run', name]).report.files.some(file => file.path === 'wip.js'));
 });
 
 test('recorded checks must use the configuration in force when implementation started', async t => {

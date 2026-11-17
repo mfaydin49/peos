@@ -5,7 +5,7 @@ import { readFile, unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { check, config, fixture, git, jsonCli, repository, saveConfig } from './helpers.mjs';
 import { parsePlan, planDigest } from '../scripts/lib/next.mjs';
-import { designRequested } from '../scripts/lib/run-state.mjs';
+import { decisionGate, decisionGroups, designRequested, readState } from '../scripts/lib/run-state.mjs';
 
 const cliRun = (project, action, args = []) => jsonCli('peos-run.mjs', [action, '--project', project, ...args]).report;
 // The user's decision commands leave a grant; the CLI records one outside Claude Code.
@@ -194,15 +194,13 @@ test('a refactor records its baseline before the implementer', async t => {
   assert.deepEqual(agentsOf(next(project, name)), ['peos:implementer']);
 });
 
-test('a large run decides each gate, then implements, checks and evaluates milestone by milestone', async t => {
+test('a large run decides its direction once, then its plan, then implements, checks and evaluates milestone by milestone', async t => {
   const { project, name, dir } = await start(t, { tier: 'large' });
   await writeFile(resolve(dir, 'idea.md'), 'Reports app.');
   next(project, name);
   await writeFile(resolve(dir, 'spec.md'), '# Spec\n- AC-1: a\n- AC-2: b\n');
   await report(dir, 'spec', { evaluator: 'spec', verdict: 'PASS', subject: next(project, name).agents[0].inputs.subject });
-  const specGate = next(project, name);
-  assert.deepEqual([specGate.do, specGate.gates.join()], ['gate', 'spec']);
-  decide(project, 'approve', '--gate', 'spec', name);
+  // The spec passes on its PASS: the direction is decided once, with the architecture.
   const architect = next(project, name);
   assert.deepEqual(agentsOf(architect), ['peos:architect']);
   await writeFile(resolve(dir, 'architecture.md'), '# Architecture\n');
@@ -211,8 +209,13 @@ test('a large run decides each gate, then implements, checks and evaluates miles
   assert.equal(architectureEval.agents[0].inputs.focus, 'architecture');
   assert.match(architectureEval.agents[0].inputs.report, /pending-eval-plan-architecture\.json$/);
   await report(dir, 'plan-architecture', { evaluator: 'plan', focus: 'architecture', verdict: 'PASS', subject: architectureEval.agents[0].inputs.subject });
-  assert.deepEqual(next(project, name).gates, ['architecture']);
-  decide(project, 'approve', '--gate', 'architecture', name);
+  const direction = next(project, name);
+  assert.deepEqual([direction.do, direction.gates], ['gate', ['spec', 'architecture']]);
+  assert.match(direction.message, /^Approve with \/peos:approve, or request changes with \/peos:revise <spec\|architecture> <feedback>\. Approving also consents to installing the dependencies/);
+  // The planner does not start on an undecided direction.
+  assert.equal(cliRun(project, 'advance', ['--run', name, '--to', 'plan']).error.code, 'GATE');
+  const approved = decide(project, 'approve', '--gate', 'architecture', name);
+  assert.deepEqual([approved.gates.spec.status, approved.gates.architecture.status, approved.gates.plan.status], ['approved', 'approved', 'pending']);
   const planner = next(project, name);
   assert.equal(planner.agents[0].inputs.architecture, resolve(dir, 'architecture.md'));
   await writeFile(resolve(dir, 'plan.md'), '# Plan\n## Milestones\n- M1: skeleton — steps: S1\n- M2: export — steps: S2\n\n## Steps\n\n### S1 — skeleton\n- Covers: AC-1\n\n### S2 — export\n- Covers: AC-2\n');
@@ -223,7 +226,8 @@ test('a large run decides each gate, then implements, checks and evaluates miles
   assert.deepEqual([first.agents[0].inputs.steps, first.agents[0].inputs.milestone], [['S1'], 'M1']);
   assert.match(first.agents[0].inputs.dependencies, /approved architecture/);
   await writeFile(resolve(project, 'base.txt'), 'skeleton\n');
-  await writeFile(resolve(project, 'skeleton.js'), 'export function startServer() {}\n');
+  // The first milestone is most of the change, so the second one is worth a delta evaluation.
+  await writeFile(resolve(project, 'skeleton.js'), `export function startServer() {}\n${'// skeleton\n'.repeat(40)}`);
   cliRun(project, 'finish', next(project, name, ['--done', 'S1']).args);
   const evaluate = next(project, name);
   assert.deepEqual(evaluate.agents.map(entry => entry.inputs.focus), ['acceptance', 'quality', 'tests']);
@@ -262,6 +266,7 @@ test('an app starts in an empty repository and binds the checks its walking skel
     await writeFile(resolve(dir, file), gate === 'plan' ? '# Plan\n## Milestones\n- M1: skeleton — steps: S1\n\n### S1 — skeleton\n- Covers: AC-1\n' : `# ${gate}\n- AC-1: a\n`);
     const subject = next(project, name).agents[0].inputs.subject;
     await report(dir, focus ? `${evaluator}-${focus}` : evaluator, { evaluator, ...(focus ? { focus } : {}), verdict: 'PASS', subject });
+    if (gate === 'spec') continue;
     assert.equal(next(project, name).do, 'gate');
     decide(project, 'approve', '--gate', gate, name);
   }
@@ -447,6 +452,20 @@ test('a step digest covers its whole criteria and the architecture', () => {
 
 const uiSpec = (design = 'new') => `# Spec\n\n## User interface\n<!-- Design: new -->\nDesign: ${design}\n| Screen | States |\n| Home | loading, empty |\n\n## Acceptance criteria\n- AC-1: a\n- AC-2: b\n`;
 
+test('one approval decides a group of gates: everything on standard, direction then plan on large', () => {
+  const state = (tier, gates) => ({ tier, gates: Object.fromEntries(gates.map(([name, status]) => [name, { status }])) });
+  assert.deepEqual(decisionGroups(state('standard', [['spec', 'pending'], ['design', 'pending'], ['plan', 'pending']])), [['spec', 'design', 'plan']]);
+  assert.deepEqual(decisionGroups(state('large', [['spec', 'pending'], ['architecture', 'pending'], ['design', 'pending'], ['plan', 'pending']])), [['spec', 'architecture', 'design'], ['plan']]);
+  assert.equal(decisionGate(state('standard', [['spec', 'pending'], ['plan', 'pending']])), 'plan');
+  assert.equal(decisionGate(state('large', [['spec', 'pending'], ['architecture', 'pending'], ['plan', 'pending']])), 'architecture');
+  assert.equal(decisionGate(state('large', [['spec', 'pending'], ['architecture', 'pending'], ['design', 'pending'], ['plan', 'pending']])), 'design');
+  assert.equal(decisionGate(state('large', [['spec', 'approved'], ['architecture', 'approved'], ['plan', 'pending']])), 'plan');
+  // A revised spec reopens the direction, not only the plan.
+  assert.equal(decisionGate(state('large', [['spec', 'revision_requested'], ['architecture', 'pending'], ['plan', 'pending']])), 'architecture');
+  assert.equal(decisionGate(state('small', [])), undefined);
+  assert.equal(decisionGate(state('large', [['spec', 'approved'], ['architecture', 'approved'], ['plan', 'approved']])), undefined);
+});
+
 test('a spec asks for a design only with Design: new in its User interface section', () => {
   assert.equal(designRequested(uiSpec()), true);
   assert.equal(designRequested(uiSpec('existing')), false);
@@ -455,7 +474,7 @@ test('a spec asks for a design only with Design: new in its User interface secti
   for (const line of ['`Design: new`', '**Design:** new', 'Design: `new`', '- **Design**: new', '| Design: new |']) assert.equal(designRequested(`## User interface\n${line}\n`), true, line);
 });
 
-test('a large run with new screens decides a design between architecture and plan, and builds from it', async t => {
+test('a large run with new screens decides spec, architecture and design at once, and builds from the design', async t => {
   const { project, name, dir } = await start(t, { tier: 'large' });
   await writeFile(resolve(dir, 'idea.md'), 'Reports app.');
   next(project, name);
@@ -464,13 +483,9 @@ test('a large run with new screens decides a design between architecture and pla
   assert.ok(specEval.applied.includes('design gate added'));
   assert.deepEqual(Object.keys(JSON.parse(await readFile(resolve(dir, 'state.json'))).gates), ['spec', 'architecture', 'design', 'plan']);
   await report(dir, 'spec', { evaluator: 'spec', verdict: 'PASS', subject: specEval.agents[0].inputs.subject });
-  next(project, name);
-  decide(project, 'approve', '--gate', 'spec', name);
-  next(project, name);
+  assert.deepEqual(agentsOf(next(project, name)), ['peos:architect']);
   await writeFile(resolve(dir, 'architecture.md'), '# Architecture\n');
   await report(dir, 'plan-architecture', { evaluator: 'plan', focus: 'architecture', verdict: 'PASS', subject: next(project, name).agents[0].inputs.subject });
-  next(project, name);
-  decide(project, 'approve', '--gate', 'architecture', name);
   const designer = next(project, name);
   assert.deepEqual([designer.stage, agentsOf(designer).join()], ['design', 'peos:designer']);
   assert.deepEqual([designer.agents[0].inputs.output, designer.agents[0].inputs.preview, designer.agents[0].inputs.architecture],
@@ -479,14 +494,20 @@ test('a large run with new screens decides a design between architecture and pla
   await writeFile(resolve(dir, 'design.md'), '# Design\n');
   await writeFile(resolve(dir, 'design-preview.html'), '<p>preview</p>');
   const designEval = next(project, name);
-  assert.deepEqual([agentsOf(designEval).join(), designEval.agents[0].inputs.focus], ['peos:eval-plan', 'design']);
-  assert.match(designEval.agents[0].inputs.report, /pending-eval-plan-design\.json$/);
-  await report(dir, 'plan-design', { evaluator: 'plan', focus: 'design', verdict: 'PASS', subject: designEval.agents[0].inputs.subject });
+  assert.deepEqual([agentsOf(designEval).join(), designEval.agents[0].inputs.focus], ['peos:eval-design', undefined]);
+  assert.match(designEval.agents[0].inputs.report, /pending-eval-design\.json$/);
+  // peos-run serves the preview file, so the evaluator judges the design as rendered.
+  const served = await fetch(designEval.agents[0].inputs['preview url']);
+  assert.deepEqual([served.status, await served.text()], [200, '<p>preview</p>']);
+  assert.match(served.headers.get('content-security-policy'), /default-src 'none'/);
+  assert.equal((await fetch(`${designEval.agents[0].inputs['preview url']}/state.json`)).status, 404);
+  await report(dir, 'design', { evaluator: 'design', verdict: 'PASS', subject: designEval.agents[0].inputs.subject });
   const gate = next(project, name);
-  assert.deepEqual(gate.gates, ['design']);
+  assert.deepEqual(gate.gates, ['spec', 'architecture', 'design'], 'one decision covers the direction');
   assert.ok(gate.artifacts.includes(resolve(dir, 'design-preview.html')));
   assert.match(gate.message, /design-preview\.html/);
-  decide(project, 'approve', '--gate', 'design', name);
+  assert.ok(Object.values(decide(project, 'approve', '--gate', 'design', name).gates).slice(0, 3).every(entry => entry.status === 'approved'));
+  await assert.rejects(fetch(designEval.agents[0].inputs['preview url']), 'the decided design is no longer served');
   const planner = next(project, name);
   assert.equal(planner.agents[0].inputs.design, resolve(dir, 'design.md'));
   await writeFile(resolve(dir, 'plan.md'), '# Plan\n## Milestones\n- M1: all — steps: S1\n\n## Steps\n\n### S1 — theme\n- Covers: AC-1, AC-2\n');
@@ -511,7 +532,7 @@ test('a standard run passes its design on a PASS and decides spec, design and pl
   assert.deepEqual(agentsOf(designer), ['peos:designer']);
   assert.equal(designer.agents[0].inputs.architecture, undefined);
   await writeFile(resolve(dir, 'design.md'), '# Design\n');
-  await report(dir, 'plan-design', { evaluator: 'plan', focus: 'design', verdict: 'PASS', subject: next(project, name).agents[0].inputs.subject });
+  await report(dir, 'design', { evaluator: 'design', verdict: 'PASS', subject: next(project, name).agents[0].inputs.subject });
   assert.deepEqual(agentsOf(next(project, name)), ['peos:planner']);
   await writeFile(resolve(dir, 'plan.md'), '# Plan\n\n## Steps\n\n### S1 — screen\n- Covers: AC-1, AC-2\n');
   await report(dir, 'plan', { evaluator: 'plan', verdict: 'PASS', subject: next(project, name).agents[0].inputs.subject });
@@ -566,14 +587,16 @@ test('the preview is part of the design, and changed upstream artifacts invalida
   await writeFile(resolve(dir, 'design.md'), '# Design\n');
   await writeFile(resolve(dir, 'design-preview.html'), '<link href="https://fonts.example/x.css">');
   const first = next(project, name);
-  await report(dir, 'plan-design', { evaluator: 'plan', focus: 'design', verdict: 'FAIL', subject: first.agents[0].inputs.subject, findings: [finding('the preview loads a web font')] });
+  await report(dir, 'design', { evaluator: 'design', verdict: 'FAIL', subject: first.agents[0].inputs.subject, findings: [finding('the preview loads a web font')] });
   assert.deepEqual(agentsOf(next(project, name)), ['peos:designer']);
   // A fix to the preview alone is a new design for the evaluator.
   await writeFile(resolve(dir, 'design-preview.html'), '<p>preview</p>');
   const again = next(project, name);
-  assert.deepEqual(agentsOf(again), ['peos:eval-plan']);
+  assert.deepEqual(agentsOf(again), ['peos:eval-design']);
+  assert.equal(again.agents[0].inputs['preview url'], first.agents[0].inputs['preview url'], 'the running server is reused and serves the new file');
+  assert.equal(await (await fetch(again.agents[0].inputs['preview url'])).text(), '<p>preview</p>');
   assert.notEqual(again.agents[0].inputs.subject, first.agents[0].inputs.subject);
-  await report(dir, 'plan-design', { evaluator: 'plan', focus: 'design', verdict: 'PASS', subject: again.agents[0].inputs.subject });
+  await report(dir, 'design', { evaluator: 'design', verdict: 'PASS', subject: again.agents[0].inputs.subject });
   next(project, name);
   await writeFile(resolve(dir, 'plan.md'), '# Plan\n\n## Steps\n\n### S1 — screen\n- Covers: AC-1, AC-2\n');
   await report(dir, 'plan', { evaluator: 'plan', verdict: 'PASS', subject: next(project, name).agents[0].inputs.subject });
@@ -581,7 +604,7 @@ test('the preview is part of the design, and changed upstream artifacts invalida
   // A new design version makes the plan's evaluation stale.
   await writeFile(resolve(dir, 'design.md'), '# Design\n## Screens\n### Settings\n');
   const designEval = next(project, name);
-  await report(dir, 'plan-design', { evaluator: 'plan', focus: 'design', verdict: 'PASS', subject: designEval.agents[0].inputs.subject });
+  await report(dir, 'design', { evaluator: 'design', verdict: 'PASS', subject: designEval.agents[0].inputs.subject });
   const planEval = next(project, name);
   assert.deepEqual([agentsOf(planEval).join(), planEval.agents[0].inputs.focus], ['peos:eval-plan', undefined]);
   // A changed spec makes both the design and plan evaluations stale.
@@ -589,7 +612,18 @@ test('the preview is part of the design, and changed upstream artifacts invalida
   const specEval = next(project, name);
   await report(dir, 'spec', { evaluator: 'spec', verdict: 'PASS', subject: specEval.agents[0].inputs.subject });
   const after = next(project, name);
-  assert.equal(after.agents[0].inputs.focus, 'design');
+  assert.equal(after.agents[0].agent, 'peos:eval-design');
   const state = JSON.parse(await readFile(resolve(dir, 'state.json')));
-  assert.deepEqual([state.evals['plan-design'], state.evals.plan], [undefined, undefined]);
+  assert.deepEqual([state.evals.design, state.evals.plan], [undefined, undefined]);
+});
+
+test('a run recorded with the earlier design evaluation key keeps its evaluation', async t => {
+  const { project, name, dir } = await start(t, { tier: 'standard' });
+  const path = resolve(dir, 'state.json');
+  const state = JSON.parse(await readFile(path, 'utf8'));
+  state.gates = { spec: { status: 'pending' }, design: { status: 'pending' }, plan: { status: 'pending' } };
+  state.evals = { 'plan-design': { verdict: 'PASS', round: 1, subject: sha('x') } };
+  await writeFile(path, JSON.stringify(state));
+  assert.deepEqual(Object.keys((await readState(dir)).evals), ['design']);
+  assert.equal(cliRun(project, 'status', ['--run', name]).assessment.evals.design.verdict, 'PASS');
 });

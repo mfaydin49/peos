@@ -17,7 +17,9 @@
 <!-- Top-level folders and their purpose; where features, shared code and tests live. -->
 
 ## Boundaries and dependencies
-<!-- Which layers may import which; public contracts; generated or vendored code to leave alone. -->
+<!-- Which layers may import which, and what enforces each rule (compiler, the lint
+     rule and its config file) or "not enforced"; public contracts; generated or
+     vendored code to leave alone. -->
 
 ## Design system
 <!-- Theme and token files, component library, icon set, typography, light/dark support,

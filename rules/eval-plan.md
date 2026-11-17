@@ -16,7 +16,12 @@ Blocking (`high` or `critical`):
 - Large tier: milestones are missing, `M1` is not runnable and testable on its own, or a
   step belongs to no milestone. For a new application (`app`), `M1` is not a walking
   skeleton whose first step creates the manifests, `.gitignore` (build output and
-  installed packages) and a root test command with one passing test.
+  installed packages), a root test command with one passing test, and the lint (with
+  the boundary rules), typecheck and format-check commands the architecture's "Quality
+  gates" names, including, for an application with a user interface, the `dev` script
+  with a pinned port or the `ui:capture` command that shows its screens.
+- A step puts a new file outside the architecture's "Structure", or needs an import its
+  "Boundaries" forbid.
 - A step installs a dependency the approved architecture does not list.
 - With a design: no step before the first interface step creates the theme (tokens)
   from `design.md`, or a screen the design describes is built by no step.
@@ -45,30 +50,14 @@ not listed under "External services and dependencies"; a choice that contradicts
 spec, a non-goal, or the existing project's stack and boundaries without a stated
 reason; data ownership, authentication or authorization the spec implies but the
 architecture leaves open; secrets placed in code or configuration that is committed;
-an open question left for the implementer.
+an open question left for the implementer; "Structure" that leaves the place of a new
+file to judgment, or contradicts the existing project's layout without a stated reason;
+a dependency direction in "Boundaries" with no enforcement and no reason given; for a
+new application, "Quality gates" without a root test, lint and (where the language has
+one) typecheck command, or boundary rules the `lint` command does not run; for a new
+application with a user interface, no way named to show its built screens (a `dev`
+script with a pinned port, or a `ui:capture` command).
 
 Non-blocking: a heavier stack than the spec needs, a dependency the platform's standard
 library makes unnecessary, a component without an established need, a risk without
 mitigation. Do not judge taste in technology; judge fit to the spec and the project.
-
-## Focus `design`
-
-Input: `design.md`, `design-preview.html`, `spec.md`, and `architecture.md` and the
-project profile when given; in an existing project, the theme and component files the
-design says it extends. Set `"focus": "design"`. Use `criteria` for each `AC-n` about
-the interface: `met` when a screen and state of the design shows it, otherwise
-`not_met`; leave other criteria out.
-
-Blocking: a screen or state the spec's "User interface" section lists that the design
-does not describe; an interface criterion no screen shows; a color used for text
-without a token pair, or a text pair below WCAG AA (4.5:1, 3:1 for large text) in
-either scheme the spec requires; touch targets below the platform minimum; no dark
-values when the spec or platform requires dark mode; tokens or components that
-replace an existing design system's without a stated reason; a font, icon set or asset
-that needs a dependency the architecture does not list; a preview that is missing, loads
-anything from the network or contradicts `design.md`; an open question left for the
-implementer.
-
-Non-blocking: inconsistent spacing or type use between screens, a component that could
-reuse an existing one, a platform convention not followed without a reason. Do not judge
-taste; judge fit to the spec, the platform, accessibility and the existing system.

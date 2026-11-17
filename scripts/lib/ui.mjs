@@ -1,9 +1,11 @@
 // What eval-ui looks at (docs/design/eval-ui.md §5): screenshots a project's ui-capture
 // check wrote into <run>/ui/, or a local preview server peos-run started for the run.
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { lstat, readFile, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { fail } from './cli.mjs';
+import { fileURLToPath } from 'node:url';
+import { fail, ToolkitError } from './cli.mjs';
 import { readRunFile, writeJsonAtomic } from './run-state.mjs';
 
 const manifestLimit = 1024 * 1024;
@@ -118,4 +120,25 @@ export async function stopPreview(directory) {
   }
   await rm(resolve(directory, 'preview.json'), { force: true });
   return { stopped };
+}
+
+// The design preview is one static file; peos-run serves it on a loopback port of its own
+// so the design evaluator can look at it rendered (design-gate.md). The port follows from
+// the run directory, so a later call finds the server it started; a taken port moves on.
+const serveScript = fileURLToPath(new URL('../serve-preview.mjs', import.meta.url));
+const designPorts = 4;
+function designPort(directory) {
+  return 20000 + createHash('sha256').update(directory).digest().readUInt16BE(0) % 20000;
+}
+export async function startDesignPreview(project, directory, file) {
+  const base = designPort(directory);
+  const urls = Array.from({ length: designPorts }, (_, offset) => `http://127.0.0.1:${base + offset}`);
+  const running = await runningPreview(directory);
+  if (running && urls.includes(running.url)) return running.url;
+  for (const url of urls) {
+    try {
+      return (await startPreview(project, directory, { executable: process.execPath, args: [serveScript, file, new URL(url).port], url, readyPath: '/', timeoutMs: 5000 })).url;
+    } catch (error) { if (!(error instanceof ToolkitError)) throw error; }
+  }
+  return null;
 }

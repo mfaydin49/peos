@@ -47,6 +47,11 @@ Work:
    lines. Every agent and evaluator reads the spec again, so length costs on each round.
 8. Keep the template's headings in English; write the content in the output language.
 
+The user was asked once at intake: `## Answers` in the request are decisions, never
+ask them again. Ask only a choice that is the user's alone, that the request and those
+answers leave open, and where a wrong default would cost this stage again; otherwise
+decide, record it under Decisions as an agent default, and let the gate correct it.
+
 Output exactly one of these, nothing else:
 
 ```text

@@ -5,8 +5,8 @@ import { chmod, mkdir, readFile, realpath as realpathOf, writeFile } from 'node:
 import { spawnSync } from 'node:child_process';
 import { basename, dirname, resolve } from 'node:path';
 import { config, fixture, git, jsonCli, repository, saveConfig, toolkit } from './helpers.mjs';
-import { detectChecks } from '../scripts/lib/setup.mjs';
-import { sessionCalls, summarizeUsage, totals } from '../scripts/lib/usage.mjs';
+import { detectChecks, detectPreview } from '../scripts/lib/setup.mjs';
+import { byAgent, sessionCalls, summarizeUsage, totals } from '../scripts/lib/usage.mjs';
 
 const run = (project, action, args = []) => jsonCli('peos-run.mjs', [action, '--project', project, ...args]).report;
 const commit = (project, message = 'change') => { git(project, 'add', '.'); git(project, 'commit', '-m', message); };
@@ -60,6 +60,32 @@ test('setup leaves the configuration alone while a run is in progress', async t 
   assert.deepEqual([during.config, during.addedChecks, during.suggestedChecks], ['existing', [], ['lint: npm run lint']]);
   run(project, 'advance', ['--run', name, '--to', 'stopped']);
   assert.deepEqual(run(project, 'setup').addedChecks, ['lint: npm run lint']);
+});
+
+test('setup configures the preview a dev script pins and a ui:capture script, never a guessed port', async t => {
+  const project = await repository(t);
+  const manifest = scripts => writeFile(resolve(project, 'package.json'), JSON.stringify({ scripts }));
+  await manifest({ test: 'vitest run', dev: 'vite' });
+  assert.equal(await detectPreview(project), null, 'a default port is not guessed');
+  for (const [script, port] of [['vite --port 5173 --strictPort', 5173], ['next dev -p 3000', 3000], ['astro dev --port=4321', 4321]]) {
+    await manifest({ test: 'vitest run', dev: script });
+    assert.deepEqual(await detectPreview(project), { executable: 'npm', args: ['run', 'dev'], url: `http://localhost:${port}`, timeoutMs: 60000 }, script);
+  }
+  await manifest({ test: 'vitest run', dev: 'vite --port 80' });
+  assert.equal(await detectPreview(project), null, 'a privileged port');
+  await manifest({ test: 'vitest run', dev: 'vite', start: 'serve dist -p 4173', 'ui:capture': 'playwright test' });
+  commit(project);
+  const created = run(project, 'setup');
+  assert.deepEqual([created.config, created.preview], ['created', 'npm run start at http://localhost:4173']);
+  assert.ok(created.checks.includes('ui-capture: npm run ui:capture'));
+  const written = JSON.parse(await readFile(resolve(project, '.project-os/engineering.config.json'), 'utf8'));
+  assert.deepEqual([written.preview.url, written.checks.find(entry => entry.id === 'ui-capture').kind], ['http://localhost:4173', 'ui-capture']);
+  // An existing configuration gains the preview once the manifest declares it, and keeps its own.
+  delete written.preview;
+  await saveConfig(project, written);
+  assert.deepEqual([run(project, 'setup').config, run(project, 'setup').preview], ['updated', 'npm run start at http://localhost:4173']);
+  await saveConfig(project, { ...written, preview: { executable: 'npm', args: ['run', 'dev'], url: 'http://localhost:9999', timeoutMs: 1000 } });
+  assert.deepEqual([run(project, 'setup').config, run(project, 'setup').preview], ['existing', 'npm run dev at http://localhost:9999']);
 });
 
 test('setup links CLAUDE.md to an existing AGENTS.md and never overwrites it', async t => {
@@ -125,6 +151,25 @@ test('usage counts each model call once across the session, its subagents and co
   assert.equal(summarizeUsage({ sessions: {}, calls: {} }, 'small'), null);
 });
 
+test('usage names the agent of each subagent call and status lists agents by cost', async t => {
+  const project = await repository(t);
+  const transcript = resolve(project, 'session-3.jsonl');
+  await writeFile(transcript, call('m1', '2026-01-02T00:00:00Z', [1, 1, 0, 8]));
+  await mkdir(resolve(project, 'session-3/subagents'), { recursive: true });
+  for (const [name, type, calls] of [['a', 'peos:eval-code', [call('m1', '2026-01-02T00:00:00Z', [1, 1, 0, 8]), call('e1', '2026-01-02T00:01:00Z', [0, 5, 0, 95]), call('e1', '2026-01-02T00:01:00Z', [0, 9, 0, 95])]],
+    ['b', 'peos:implementer', [call('i1', '2026-01-02T00:02:00Z', [0, 10, 0, 20])]], ['c', null, [call('u1', '2026-01-02T00:03:00Z', [0, 1, 0, 1])]]]) {
+    await writeFile(resolve(project, `session-3/subagents/agent-${name}.jsonl`), calls.join('\n'));
+    if (type) await writeFile(resolve(project, `session-3/subagents/agent-${name}.meta.json`), JSON.stringify({ agentType: type }));
+  }
+  const calls = await sessionCalls(transcript, 0);
+  // A call the fork repeats stays the main session's; the larger output keeps its agent.
+  assert.deepEqual(calls, { m1: [1, 1, 0, 8], e1: [0, 9, 0, 95, 'peos:eval-code'], i1: [0, 10, 0, 20, 'peos:implementer'], u1: [0, 1, 0, 1, 'subagent'] });
+  assert.deepEqual(byAgent(calls), { 'peos:eval-code': { total: 104, output: 9, calls: 1 }, 'peos:implementer': { total: 30, output: 10, calls: 1 },
+    main: { total: 10, output: 1, calls: 1 }, subagent: { total: 2, output: 1, calls: 1 } });
+  assert.equal(totals(calls).total, 146);
+  assert.deepEqual(Object.keys(summarizeUsage({ calls }, 'small').byAgent), ['peos:eval-code', 'peos:implementer', 'main', 'subagent']);
+});
+
 test('the Stop hook records usage for the run the session works on and status shows it', async t => {
   const project = await repository(t);
   await saveConfig(project, config());
@@ -143,6 +188,24 @@ test('the Stop hook records usage for the run the session works on and status sh
   assert.deepEqual(record.calls, { m1: [1, 2, 3, 4] });
   const status = run(project, 'status', ['--run', name]);
   assert.deepEqual([status.usage.total, status.usage.budget, status.usage.overBudget], [10, 3_000_000, false]);
+});
+
+test('usage counts the intake before the run was created, from the request that started it', async t => {
+  const project = await repository(t);
+  await saveConfig(project, config());
+  const earlier = offset => new Date(Date.now() - offset).toISOString();
+  const transcript_path = resolve(project, 'session-4.jsonl');
+  const prompt = (at, content) => JSON.stringify({ type: 'user', timestamp: at, message: { role: 'user', content } });
+  const { directory } = run(project, 'init', ['--name', 'avatar', '--type', 'feature', '--tier', 'small']);
+  const init = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'node "/x/scripts/peos-run.mjs" init --project "/p" --name avatar --type feature --tier small --json' } }] } });
+  await writeFile(transcript_path, [call('old', earlier(90000), [0, 0, 0, 500]), prompt(earlier(60000), '<command-name>/peos:start</command-name> add avatars'),
+    call('investigator', earlier(50000), [0, 5, 0, 95]), prompt(earlier(40000), [{ type: 'tool_result', tool_use_id: 'x', content: 'report' }]),
+    call('classify', earlier(30000), [0, 1, 0, 9]), init, call('after', new Date(Date.now() + 1000).toISOString(), [1, 2, 3, 4])].join('\n'));
+  const result = spawnSync(process.execPath, [resolve(toolkit, 'hooks/usage-record.mjs')], {
+    input: JSON.stringify({ cwd: project, transcript_path }), encoding: 'utf8', env: { ...process.env, CLAUDE_PROJECT_DIR: project } });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(Object.keys(JSON.parse(await readFile(resolve(directory, 'usage.json'), 'utf8')).calls).sort(), ['after', 'classify', 'investigator'],
+    'work before the request is not this run\'s');
 });
 
 test('record-eval consumes a report file the evaluator wrote into the run directory', async t => {

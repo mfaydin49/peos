@@ -1,5 +1,8 @@
 # UI/UX
 
+- Build what `rules/design-craft.md` describes: one primary action per screen, a clear
+  hierarchy, grouping by spacing, one accent, real content, designed states, and none
+  of its "Signs of a generated interface".
 - Use the project's design system and, in a run with a design, `design.md`. Every
   color, font, spacing, radius, elevation and duration comes from a token in the theme;
   no literal values in screens. Reuse existing components before adding one.

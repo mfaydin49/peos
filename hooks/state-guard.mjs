@@ -7,8 +7,8 @@
 //   artifact, an evaluator its report, the profiler the profile and missing instruction
 //   files), so the orchestrator never copies their content; the implementer may change
 //   project code but not .project-os or run peos-run.
-// - MCP tools: no PEOS agent uses them, except the UI evaluator with browser tools on the
-//   origin of a preview peos-run started for an active run (eval-ui.md §7).
+// - MCP tools: no PEOS agent uses them, except the UI and design evaluators with browser
+//   tools on the origin of a preview peos-run started for an active run (eval-ui.md §7).
 // Shell inspection is a heuristic, not a sandbox: indirection (a script that builds the
 // path itself) can evade it, which is why decisions also need a user-created grant.
 import { lstat, realpath } from 'node:fs/promises';
@@ -170,7 +170,7 @@ if (!input) {
   const implementer = input.agent_type === 'peos:implementer';
   const agent = typeof input.agent_type === 'string' && peosAgents.test(input.agent_type) ? input.agent_type : null;
   if (typeof tool === 'string' && tool.startsWith('mcp__')) {
-    if (agent && agent !== 'peos:eval-ui') deny('PEOS agents other than the UI evaluator use no MCP tools.');
+    if (agent && !['peos:eval-ui', 'peos:eval-design'].includes(agent)) deny('PEOS agents other than the UI and design evaluators use no MCP tools.');
     else if (agent) { const reason = await uiToolRefusal(project, tool, args); if (reason) deny(reason); }
   } else if (typeof input.agent_type === 'string' && peosAgents.test(input.agent_type) && [...writeTools, 'Bash'].includes(tool)) {
     const target = tool === 'Write' && project ? String(args.file_path ?? '') : '';

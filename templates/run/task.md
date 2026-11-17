@@ -21,6 +21,9 @@ tier: trivial | small
      (e.g. "module X split into Y and Z; Y does not import Z"); no new dependencies. -->
 - AC-1:
 
+## Decisions
+<!-- The user's answers at intake, and agent defaults the user can change. Remove when empty. -->
+
 ## Plan
 - S1: <change> — files: <paths> — covers: AC-1 — test: <test>
 

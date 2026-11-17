@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { main, parseArgs, projectDirectory, fail, ToolkitError } from './lib/cli.mjs';
@@ -9,14 +9,14 @@ import { next, planDigest } from './lib/next.mjs';
 import { consumeGrant, insideClaudeCode, writeGrant } from './lib/grants.mjs';
 import { codeChanges, treeChanges } from './lib/changes.mjs';
 import { loadConfig } from './lib/config.mjs';
-import { readManifest, startPreview, stopPreview } from './lib/ui.mjs';
+import { readManifest, startDesignPreview, startPreview, stopPreview } from './lib/ui.mjs';
 import { snapshotTree, treeExists } from './lib/snapshot.mjs';
 import { codeMap } from './lib/map.mjs';
 import { emptyProject, setupProject } from './lib/setup.mjs';
 import { summarizeUsage, usageFile } from './lib/usage.mjs';
 import { requireRoot, headCommit } from './lib/git.mjs';
 import {
-  runsPath, types, tiers, stages, tierGates, gateArtifacts, gateEvalKeys, gateOrder, designRequested, runDirectory, runSubdirectory, readRunFile,
+  runsPath, types, tiers, stages, tierGates, gateArtifacts, gateEvalKeys, gateOrder, decisionGate, decisionGroup, designPreview, designRequested, runDirectory, runSubdirectory, readRunFile,
   readState, writeState, writeAtomic, writeJsonAtomic, withLock, artifactHash, configHash, fingerprint
 } from './lib/run-state.mjs';
 
@@ -140,14 +140,18 @@ async function status(project, options) {
   let usage = null;
   try { usage = summarizeUsage(JSON.parse(await readRunFile(directory, usageFile) ?? 'null'), state.tier); } catch { usage = null; }
   // Artifact hashes are what spec and plan evaluators must name as their subject.
-  return { run: state.run, directory, state, codeState, ...(codeStateError ? { codeStateError } : {}), artifacts, assessment, usage, specSize: await specSize(directory, state) };
+  // `decision` is the gate a bare /peos:approve decides (it covers the earlier gates of its group).
+  const decision = decisionGate(state);
+  return { run: state.run, directory, state, ...(decision ? { decision } : {}), codeState, ...(codeStateError ? { codeStateError } : {}), artifacts, assessment, usage, specSize: await specSize(directory, state) };
 }
 // The orchestrator's view of a run: only what it acts on, since its context is read again on every turn.
 async function brief(project, options) {
   if (options.run === undefined) fail('INVOCATION', '--run is required.');
   const { run, directory, state, artifacts, assessment, usage, specSize: size } = await status(project, options);
   const evals = Object.fromEntries(Object.entries(assessment.evals).map(([key, { verdict, round, fresh }]) => [key, { verdict, round, fresh }]));
-  return { run, directory, type: state.type, tier: state.tier, stage: state.stage, gates: assessment.gates, evals, steps: state.steps, artifacts, usage, specSize: size };
+  return { run, directory, type: state.type, tier: state.tier, stage: state.stage, gates: assessment.gates, evals, steps: state.steps, artifacts,
+    // The per-agent breakdown is for the user (status), not for the orchestrator's context.
+    usage: usage && { ...usage, byAgent: undefined }, specSize: size };
 }
 async function recordChecks(project, options) {
   const directory = await runDirectory(project, options.run);
@@ -301,9 +305,9 @@ async function recordEval(project, options) {
       plateau: report.verdict === 'FAIL' && earlier?.verdict === 'FAIL' && signature(earlier) === signature(report), ...digest(report) };
   });
 }
-// A standard run decides once: the plan approval covers the earlier gates, which until
-// then only need a PASS on their current artifact.
-const decidedWithPlan = (state, gate) => state.tier === 'standard' ? gateOrder.slice(0, gateOrder.indexOf(gate)).filter(name => Object.hasOwn(state.gates, name)) : [];
+// One approval decides a whole group (run-state.mjs, decisionGroups): it covers the earlier
+// gates of the approved gate's group, which until then only need a PASS on their artifact.
+const decidedWith = (state, gate) => { const group = decisionGroup(state, gate); return group.slice(0, group.indexOf(gate)); };
 function requireFreshPass(assessment, gate) {
   const evaluation = assessment.evals[gateEvalKeys[gate]];
   if (!evaluation || !evaluation.fresh || evaluation.verdict !== 'PASS') fail('GATE', `The ${gateEvalKeys[gate]} evaluation must PASS on the current ${gateArtifacts[gate]} before approval.`);
@@ -316,7 +320,7 @@ async function approve(project, options) {
     const gate = choice(options.gate, Object.keys(state.gates), 'gate');
     await consumeGrant(project, 'approve', gate, state.run);
     const assessment = await assess(directory, state, null);
-    const covered = gate === 'plan' ? decidedWithPlan(state, gate).filter(name => !assessment.gates[name].fresh) : [];
+    const covered = decidedWith(state, gate).filter(name => !assessment.gates[name].fresh);
     const earlier = gateOrder.slice(0, gateOrder.indexOf(gate)).filter(name => Object.hasOwn(state.gates, name));
     const open = earlier.filter(name => !assessment.gates[name].fresh && !covered.includes(name));
     if (open.length) fail('GATE', `Approve earlier gates first: ${open.join(', ')}.`);
@@ -350,6 +354,8 @@ async function approve(project, options) {
     const at = new Date().toISOString();
     for (const name of decided) state.gates[name] = { status: 'approved', by: 'human', artifactHash: assessment.artifacts[name], at };
     await writeState(directory, state);
+    // The decided design needs no server any more.
+    if (decided.includes('design')) await stopPreview(directory).catch(() => null);
     return { run: state.run, gate, gates: state.gates };
   });
 }
@@ -439,7 +445,7 @@ async function changes(project, options) {
   const state = await readState(directory);
   if (!state.baseHead) fail('TRANSITION', 'The run has not entered implementation yet.');
   const before = await fingerprint(project);
-  const { files, securityTriggers, uiTriggers, modifiedTests, floorFlags, shortcuts, diff, truncated, bytes } = await codeChanges(project, state.baseHead);
+  const { files, securityTriggers, uiTriggers, modifiedTests, floorFlags, shortcuts, diff, truncated, bytes } = await codeChanges(project, state.baseHead, state.baseTree);
   const { codeState } = await fingerprint(project);
   // The diff must describe exactly the code state evaluators will certify.
   if (codeState !== before.codeState) fail('UNSTABLE', 'The code changed while the diff was computed; run changes again.');
@@ -505,11 +511,11 @@ async function advance(project, options) {
     const to = choice(options.to, stages, 'to');
     if (state.stage === 'done') fail('TRANSITION', 'The run is finished.');
     if (to === 'done' && state.stage !== 'release') fail('TRANSITION', 'Only a run at the release stage can finish.');
-    // A gated stage starts only on approved earlier artifacts; a standard run plans on an
-    // evaluated spec, which the user approves together with the plan.
+    // A gated stage starts only on approved earlier artifacts, except the earlier gates of
+    // its own decision group, which need a PASS and are approved together with it.
     if (gateOrder.includes(to)) {
       const assessment = await assess(directory, state, null);
-      const covered = decidedWithPlan(state, to).filter(name => !assessment.gates[name].fresh);
+      const covered = (Object.hasOwn(state.gates, to) ? decidedWith(state, to) : []).filter(name => !assessment.gates[name].fresh);
       for (const name of covered) requireFreshPass(assessment, name);
       const open = gateOrder.slice(0, gateOrder.indexOf(to)).filter(name => Object.hasOwn(assessment.gates, name) && !assessment.gates[name].fresh && !covered.includes(name));
       if (open.length) fail('GATE', `Approve earlier gates first: ${open.join(', ')}.`);
@@ -543,6 +549,10 @@ async function advance(project, options) {
       else state.configHash = hash;
       state.baseHead = headCommit(project);
       state.baseCodeState = (await fingerprint(project)).codeState;
+      // What the working tree already held (setup files, the user's own uncommitted
+      // work) is not this run's change: the change is what differs from this snapshot.
+      const tree = await snapshotTree(project);
+      if (tree) state.baseTree = tree;
     }
     state.stage = to;
     await writeState(directory, state);
@@ -640,9 +650,18 @@ async function designGate(project, options) {
     return { run: state.run, changed: true, design: wanted };
   });
 }
+// Serves the run's design preview for its evaluator; without one, or when no port is
+// free, the design is judged from its files.
+async function serveDesign(project, options) {
+  const directory = await runDirectory(project, options.run);
+  const file = resolve(directory, designPreview);
+  if (!(await lstat(file).catch(() => null))?.isFile()) return { url: null };
+  await ignoreInRun(directory, 'preview.json');
+  return { url: await startDesignPreview(project, directory, file) };
+}
 // The run's control flow: the next action for the orchestrator (design peos-next.md).
 function nextAction(project, options) {
-  return next(project, options, { status, advance, step, recordEval, changes, delta, carryEval, map, setup, completeMilestone, designGate });
+  return next(project, options, { status, advance, step, recordEval, changes, delta, carryEval, map, setup, completeMilestone, designGate, serveDesign });
 }
 
 const handlers = { init, status, brief, begin, finish, next: nextAction, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step, grant, changes, delta, 'carry-eval': carryEval, 'record-baseline': recordBaseline, map, setup,
@@ -664,11 +683,13 @@ await main(async () => {
   if (report.action === 'status') return [
     `${report.run}: ${report.state.type}/${report.state.tier} at ${report.state.stage}`,
     ...Object.entries(report.assessment.gates).map(([name, gate]) => `gate ${name}: ${gate.status}${gate.status === 'approved' && !gate.fresh ? ' (stale)' : ''}`),
+    ...(report.decision ? [`next decision: /peos:approve ${report.decision}`] : []),
     ...Object.entries(report.assessment.evals).map(([key, evaluation]) => `eval ${key}: ${evaluation.verdict} round ${evaluation.round}${evaluation.fresh ? '' : ' (stale)'}`),
     ...(report.assessment.baseline ? [`baseline: ${report.assessment.baseline.status} ${report.assessment.baseline.verification}${report.assessment.baseline.matches ? '' : ' (does not match this run)'}`]
       : report.state.type === 'refactor' ? ['baseline: none recorded (required for a refactor)'] : []),
     report.assessment.checks ? `checks: ${report.assessment.checks.status} ${report.assessment.checks.verification} ${report.assessment.checks.phase}${report.assessment.checks.fresh ? '' : ' (stale)'}` : 'checks: none recorded',
-    ...(report.usage ? [`usage: ${(report.usage.total / 1e6).toFixed(1)}M tokens in ${report.usage.calls} model calls (budget ${(report.usage.budget / 1e6).toFixed(1)}M for ${report.state.tier})${report.usage.overBudget ? ' — over budget' : ''}`] : [])
+    ...(report.usage ? [`usage: ${(report.usage.total / 1e6).toFixed(1)}M tokens in ${report.usage.calls} model calls (budget ${(report.usage.budget / 1e6).toFixed(1)}M for ${report.state.tier})${report.usage.overBudget ? ' — over budget' : ''}`,
+      ...Object.entries(report.usage.byAgent).map(([agent, use]) => `  ${agent}: ${(use.total / 1e6).toFixed(1)}M (${Math.round(100 * use.total / report.usage.total)}%) in ${use.calls} calls`)] : [])
   ].join('\n');
   if (report.action === 'fingerprint') return `${report.codeState} (HEAD ${report.head}, ${report.changedPaths} changed paths)`;
   if (report.action === 'map') return report.path ? `Code map ${report.changed ? 'written to' : 'unchanged at'} ${JSON.stringify(report.path)} (${report.folders} folders, ${report.read} file(s) read).` : report.map || 'No top-level definitions found.';
@@ -679,6 +700,7 @@ await main(async () => {
     report.config === 'deferred' ? 'config: deferred (empty project: an app run configures checks after its walking skeleton)' : `config: ${report.config} (${report.checks.join('; ')})`,
     ...(report.addedChecks.length ? [`checks added: ${report.addedChecks.join('; ')}`] : []),
     ...(report.suggestedChecks.length ? [`checks to add after the active run: ${report.suggestedChecks.join('; ')}`] : []),
+    ...(report.config === 'deferred' ? [] : [`preview: ${report.preview ?? 'none (a changed interface is not looked at; pin the port in the dev script, e.g. --port 5173, or add a ui:capture script)'}`]),
     ...Object.entries(report.instructions).map(([file, state]) => `${file}: ${state}`),
     `profile: ${report.profile.status}${report.profile.reason ? ` (${report.profile.reason})` : ''}`
   ].join('\n');

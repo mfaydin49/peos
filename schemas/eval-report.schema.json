@@ -2,14 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/personal-engineering-os/eval-report.schema.json",
   "title": "Personal Engineering OS evaluator report",
-  "$comment": "Returned by an evaluator agent as its final message and persisted by the orchestrator. Spec and plan evaluations judge an artifact (sha256); code, security, ui and performance evaluations judge a code state (fp).",
+  "$comment": "Returned by an evaluator agent as its final message and persisted by the orchestrator. Spec, plan and design evaluations judge an artifact (sha256); code, security, ui and performance evaluations judge a code state (fp).",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "evaluator", "verdict", "mode", "subject", "criteria", "findings", "notAssessed"],
   "properties": {
     "schemaVersion": { "type": "integer", "const": 1 },
-    "evaluator": { "enum": ["spec", "plan", "code", "security", "ui", "performance"] },
-    "focus": { "enum": ["architecture", "design", "acceptance", "quality", "tests", "all"] },
+    "evaluator": { "enum": ["spec", "plan", "design", "code", "security", "ui", "performance"] },
+    "focus": { "enum": ["architecture", "acceptance", "quality", "tests", "all"] },
     "verdict": { "enum": ["PASS", "FAIL", "BLOCKED"] },
     "mode": { "enum": ["full", "degraded"] },
     "subject": { "type": "string", "pattern": "^(?:fp|sha256):[0-9a-f]{64}$" },
@@ -51,8 +51,8 @@
   },
   "allOf": [
     {
-      "$comment": "Spec and plan judge artifacts; the others judge code states.",
-      "if": { "properties": { "evaluator": { "enum": ["spec", "plan"] } } },
+      "$comment": "Spec, plan and design judge artifacts; the others judge code states.",
+      "if": { "properties": { "evaluator": { "enum": ["spec", "plan", "design"] } } },
       "then": { "properties": { "subject": { "type": "string", "pattern": "^sha256:" } } },
       "else": { "properties": { "subject": { "type": "string", "pattern": "^fp:" } } }
     },
@@ -62,10 +62,10 @@
     },
     {
       "if": { "properties": { "evaluator": { "const": "plan" } } },
-      "then": { "properties": { "focus": { "enum": ["architecture", "design"] } } }
+      "then": { "properties": { "focus": { "enum": ["architecture"] } } }
     },
     {
-      "if": { "properties": { "evaluator": { "enum": ["spec", "security", "ui", "performance"] } } },
+      "if": { "properties": { "evaluator": { "enum": ["spec", "design", "security", "ui", "performance"] } } },
       "then": { "not": { "properties": { "focus": true }, "required": ["focus"] } }
     },
     {

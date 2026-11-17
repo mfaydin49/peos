@@ -21,13 +21,25 @@ async function transcripts(path) {
   await walk(join(dirname(path), basename(path, '.jsonl'), 'subagents'));
   return files;
 }
-// Per model call [input, output, cacheWrite, cacheRead], keyed by message id across all
-// files: resumed or forked transcripts repeat earlier calls, and a call split over several
-// lines may carry partial output counts, so the largest output wins.
+// The agent a subagent transcript belongs to: the host writes `<transcript>.meta.json`
+// with its `agentType` beside it. The main transcript, and a subagent without one, is null.
+async function agentOf(file, main) {
+  if (file === main) return null;
+  try {
+    const type = JSON.parse(await readFile(file.replace(/\.jsonl$/, '.meta.json'), 'utf8'))?.agentType;
+    return typeof type === 'string' && /^[\w:.-]{1,80}$/.test(type) ? type : 'subagent';
+  } catch { return 'subagent'; }
+}
+// Per model call [input, output, cacheWrite, cacheRead] plus, for a subagent's call, its
+// agent type, keyed by message id across all files: resumed or forked transcripts repeat
+// earlier calls, and a call split over several lines may carry partial output counts, so
+// the largest output wins. The main transcript is read first, so a call a fork repeats
+// stays the main session's.
 export async function sessionCalls(path, sinceMs) {
   const calls = {};
   let bytes = 0;
   for (const file of await transcripts(path)) {
+    const agent = await agentOf(file, path);
     bytes += (await stat(file).catch(() => ({ size: 0 }))).size;
     if (bytes > sizeLimit) return null;
     for (const line of (await readFile(file, 'utf8').catch(() => '')).split('\n')) {
@@ -38,7 +50,8 @@ export async function sessionCalls(path, sinceMs) {
       const id = entry?.message?.id;
       if (entry.type !== 'assistant' || !usage || typeof id !== 'string' || !(Date.parse(entry.timestamp) >= sinceMs)) continue;
       const counts = [usage.input_tokens, usage.output_tokens, usage.cache_creation_input_tokens, usage.cache_read_input_tokens].map(value => value || 0);
-      if (!calls[id] || counts[1] > calls[id][1]) calls[id] = counts;
+      if (!calls[id]) calls[id] = agent ? [...counts, agent] : counts;
+      else if (counts[1] > calls[id][1]) calls[id] = [...counts, ...calls[id].slice(4)];
     }
   }
   return calls;
@@ -50,9 +63,20 @@ export function totals(calls) {
   }
   return { ...total, total: total.input + total.output + total.cacheWrite + total.cacheRead };
 }
+// Totals per agent type, largest first; `main` is the orchestrating session itself.
+export function byAgent(calls) {
+  const agents = {};
+  for (const [input, output, cacheWrite, cacheRead, agent = 'main'] of Object.values(calls ?? {})) {
+    const entry = agents[agent] ??= { total: 0, output: 0, calls: 0 };
+    entry.total += input + output + cacheWrite + cacheRead;
+    entry.output += output;
+    entry.calls += 1;
+  }
+  return Object.fromEntries(Object.entries(agents).sort(([, a], [, b]) => b.total - a.total));
+}
 export function summarizeUsage(record, tier) {
   if (!record?.calls || !Object.keys(record.calls).length) return null;
   const { total, output, cacheRead, calls } = totals(record.calls);
   const budget = tierBudgets[tier];
-  return { total, output, cacheRead, calls, sessions: Object.keys(record.sessions ?? {}).length, budget, overBudget: total > budget };
+  return { total, output, cacheRead, calls, sessions: Object.keys(record.sessions ?? {}).length, budget, overBudget: total > budget, byAgent: byAgent(record.calls) };
 }

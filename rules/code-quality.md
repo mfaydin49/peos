@@ -6,6 +6,15 @@ Preserve behavior outside the task. Do not impose file-length targets or add
 abstractions for hypothetical future reuse. Judge clarity and maintainability,
 not line count. Technology choices and performance budgets belong in project documents.
 
+Structure. A file lives where the project's structure puts its responsibility (the
+run's `architecture.md` "Structure", else the profile's); one responsibility per module,
+named for what it does. Dependencies point one way, as "Boundaries" says: domain logic
+imports no UI, framework glue or I/O; no import cycles; no reaching into another
+module's internals past its public entry. State has one owner; others receive it or ask
+for it. Handle an error where something can be done about it, with the project's own
+error type or pattern, and never swallow it. Do not disable a lint, type or boundary rule
+inline; a rule that is wrong is changed in its config, as a stated decision.
+
 Least new code. Before writing code, take the first answer that works:
 1. Does it need to exist? Name unrequested features or options instead of building them.
 2. Does the codebase already do it? Reuse it (see the project's code map, `.project-os/cache/code-map.md`, when given).

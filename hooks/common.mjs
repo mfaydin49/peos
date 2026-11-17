@@ -59,6 +59,21 @@ export function sessionRunNames(entries) {
   }
   return names;
 }
+// When this session began the run: its user's request just before the session created the
+// run with `peos-run init`, so the intake (profile, investigation) counts as its cost.
+// Null when another session created it.
+export function runStartedAt(entries, run) {
+  const short = run.replace(/^\d{4}-\d{2}-\d{2}-/, '');
+  const created = entries.findIndex(entry => entry?.type === 'assistant' && Array.isArray(entry.message?.content) && entry.message.content.some(block =>
+    block?.type === 'tool_use' && block.name === 'Bash' && new RegExp(`peos-run[\\s\\S]*\\binit\\b[\\s\\S]*--name\\s+["']?${short}["']?(?=\\s|$)`).test(String(block.input?.command ?? ''))));
+  for (let index = created - 1; index >= 0; index--) {
+    const entry = entries[index];
+    const content = entry?.type === 'user' ? entry.message?.content : null;
+    const typed = typeof content === 'string' || (Array.isArray(content) && content.some(block => block?.type === 'text'));
+    if (typed && !entry.isMeta) { const at = Date.parse(entry.timestamp); return Number.isNaN(at) ? null : at; }
+  }
+  return null;
+}
 export function worksOn(names, run) {
   return names.has(run) || names.has(run.replace(/^\d{4}-\d{2}-\d{2}-/, ''));
 }

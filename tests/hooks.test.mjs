@@ -68,11 +68,16 @@ test('approval-capture turns only a whole decision command into a grant', async 
   assert.deepEqual([(await grant()).action, (await grant()).target, (await grant()).run], ['reset-eval', 'code-all', name], 'bound to the active run');
   hook('approval-capture', project, { prompt: '/peos:approve' });
   assert.deepEqual([(await grant()).action, (await grant()).target, (await grant()).run], ['approve', 'plan', name], 'a standard run decides at the plan gate');
+  assert.equal(run(project, 'status', ['--run', name]).decision, 'plan', 'status names the gate a bare approval decides');
   hook('approval-capture', project, { prompt: '  /peos:approve spec  ' });
   assert.equal((await grant()).source, 'user-prompt');
   await evaluatedSpec(project, name, directory);
   assert.equal(decision(run(project, 'approve', ['--run', name, '--gate', 'spec'])), 'PASS');
   assert.equal(hook('approval-capture', project, 'not json'), null);
+  // A large run decides its direction first: the last gate before the plan.
+  const large = run(project, 'init', ['--name', 'big', '--type', 'feature', '--tier', 'large']).run;
+  hook('approval-capture', project, { prompt: '/peos:approve' });
+  assert.deepEqual([(await grant()).target, (await grant()).run, run(project, 'status', ['--run', large]).decision], ['architecture', large, 'architecture']);
 });
 
 test('state-guard denies writes to run state, evidence and decisions, and allows artifacts', async t => {
@@ -109,7 +114,8 @@ test('state-guard denies writes to run state, evidence and decisions, and allows
   assert.equal(agentWrite('peos:designer', resolve(directory, 'design-preview.html')), null, 'and its preview');
   assert.ok(denied(agentWrite('peos:designer', resolve(directory, 'plan.md'))));
   assert.ok(denied(agentWrite('peos:designer', resolve(project, 'preview.html'))));
-  assert.equal(agentWrite('peos:eval-plan', resolve(directory, 'pending-eval-plan-design.json')), null, 'the design report');
+  assert.equal(agentWrite('peos:eval-design', resolve(directory, 'pending-eval-design.json')), null, 'the design report');
+  assert.ok(denied(agentWrite('peos:eval-design', resolve(directory, 'design.md'))), 'the design evaluator never edits the design');
   assert.equal(agentWrite('peos:eval-code', resolve(directory, 'pending-eval-code.json')), null, 'its report');
   assert.ok(denied(agentWrite('peos:eval-code', resolve(directory, 'spec.md'))));
   assert.ok(denied(agentWrite('peos:eval-code', resolve(directory, 'evals/code-all.json'))));

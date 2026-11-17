@@ -15,7 +15,8 @@ any, the project's design references when configured, the template path, the out
 language, the artifact path, the preview path and, on a revision, evaluator findings or
 user feedback to address.
 
-Follow ${CLAUDE_PLUGIN_ROOT}/rules/ui-ux.md.
+Follow ${CLAUDE_PLUGIN_ROOT}/rules/ui-ux.md and ${CLAUDE_PLUGIN_ROOT}/rules/design-craft.md: an
+independent evaluator looks at your preview rendered and blocks on what they forbid.
 
 Work:
 
@@ -26,8 +27,11 @@ Work:
    only what the new screens need, and say what you added. Do not restyle existing
    screens the spec does not touch.
 2. For a new application, set a visual direction that fits the product, its users and
-   the direction the user gave in the spec; without one, choose a restrained default
-   and record it under Decisions so the user can change it at the gate. Follow the
+   the direction the user gave in the spec or under `## Answers` in the request (a
+   design reference, when configured, is the look to learn from, not to copy). Without
+   one, derive it from the product as the craft rules say, state it under Direction, and
+   record it under Decisions so the user can change it at the gate. A direction is a
+   set of choices that exclude others; "clean and modern" is not one. Follow the
    platform's conventions (Apple Human Interface Guidelines on iOS and macOS, Material
    on Android, the web platform's own on the web) and its system font and controls
    unless the spec asks otherwise.
@@ -44,8 +48,11 @@ Work:
 5. Write the preview: one self-contained HTML file (inline CSS, no script, no network,
    no external fonts or images) that shows the tokens as swatches and type samples, and
    the main screens in their key states side by side at phone width (390 px) for a
-   mobile app or at mobile and desktop widths for the web, in light and dark. It is a
-   picture of the design, not the app: keep it under about 600 lines.
+   mobile app or at mobile and desktop widths for the web, in light and dark. Fill it
+   with the real, plausible content the screens will hold, and draw every component
+   from the tokens, exactly as the app must. It is a picture of the design, not the
+   app: keep it under about 600 lines. Before you finish, read it once against "Signs
+   of a generated interface" and remove each one you find.
 6. Keep `design.md` under about 200 lines. Keep the template's headings in English;
    write the content in the output language.
 
@@ -53,6 +60,11 @@ Decide what is reversible yourself and record it under Decisions as an agent def
 Ask only what the user alone can decide: brand colors or a logo they already have, a
 visual direction between clearly different options when the spec gives none and the
 product is new.
+
+The user was asked once at intake: `## Answers` in the request are decisions, never
+ask them again. Ask only a choice that is the user's alone, that the request and those
+answers leave open, and where a wrong default would cost this stage again; otherwise
+decide, record it under Decisions as an agent default, and let the gate correct it.
 
 Output exactly one of these, nothing else:
 

@@ -1,6 +1,7 @@
 import { lstat, open, readlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { git } from './git.mjs';
+import { snapshotTree, treeExists } from './snapshot.mjs';
 
 // Filename hints for review; never a secret scan or migration safety evidence.
 export function categories(paths) {
@@ -115,7 +116,8 @@ function sectionPath(text) {
 }
 const diffLimit = 512 * 1024;
 const fileLimit = 256 * 1024;
-const exclude = ':(exclude).project-os/runs';
+// PEOS's own files (runs, configuration, profile, cache) are never the change a run makes.
+const exclude = ':(exclude).project-os';
 const header = path => JSON.stringify(path);
 
 // A file shown in full: regular text files only. Symlinks are shown as links (their target
@@ -138,10 +140,12 @@ async function fullContent(project, path) {
 
 /**
  * Net working-tree changes against the run's base commit (what tests and evaluators
- * see), excluding run files: tracked edits, untracked files, and files hidden by the
- * assume-unchanged or skip-worktree index flags.
+ * see), excluding PEOS files: tracked edits, untracked files, and files hidden by the
+ * assume-unchanged or skip-worktree index flags. With the snapshot taken when
+ * implementation started (`baseTree`), files that are as they were then are left out:
+ * uncommitted work and setup files the run found are not its change.
  */
-export async function codeChanges(project, base) {
+export async function codeChanges(project, base, baseTree = null) {
   const list = raw => raw.split('\0').filter(Boolean);
   const tracked = list(git(project, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-status', '-z', base, '--', '.', exclude]));
   const files = [];
@@ -160,6 +164,11 @@ export async function codeChanges(project, base) {
   for (const file of extra) {
     files.push({ status: file.status, path: file.path });
     sections.push({ path: file.path, text: `--- /dev/null\n+++ b/${header(file.path)} (${file.note})\n${await fullContent(project, file.path)}\n` });
+  }
+  const now = baseTree && treeExists(project, baseTree) ? await snapshotTree(project) : null;
+  if (now) {
+    const since = new Set(list(git(project, ['diff', '--no-ext-diff', '--no-textconv', '--no-renames', '--name-only', '-z', baseTree, now, '--', '.', exclude])));
+    for (const entries of [files, sections]) entries.splice(0, entries.length, ...entries.filter(entry => since.has(entry.path)));
   }
   const securityTriggers = triggersOf(files, sections);
   const uiTriggers = uiTriggersOf(sections);
@@ -183,7 +192,8 @@ function triggersOf(files, sections) {
     file.categories = categories([file.path]);
     for (const category of file.categories) if (pathTriggers[category]) triggers.add(pathTriggers[category]);
   }
-  const added = sections.filter(section => !testPath.test(section.path))
+  // Prose describes code; it does not run. Its words ("no auth") are not a reason to look.
+  const added = sections.filter(section => !testPath.test(section.path) && !prose.test(section.path))
     .map(section => section.text.split('\n').filter(line => line.startsWith('+') && !line.startsWith('+++')).join('\n')).join('\n');
   for (const [name, pattern] of Object.entries(contentTriggers)) if (pattern.test(added)) triggers.add(name);
   return [...triggers].sort();

@@ -1,7 +1,7 @@
 // Stop: record this session's token use for the run it is working on in <run>/usage.json,
 // so status can show cost against the tier budget. Informational; never blocks.
 import { basename, resolve } from 'node:path';
-import { readInput, projectRoot, profile, activeRuns, transcriptEntries, sessionRunNames, worksOn } from './common.mjs';
+import { readInput, projectRoot, profile, activeRuns, transcriptEntries, sessionRunNames, runStartedAt, worksOn } from './common.mjs';
 import { readRunFile, writeJsonAtomic } from '../scripts/lib/run-state.mjs';
 import { sessionCalls, usageFile } from '../scripts/lib/usage.mjs';
 
@@ -17,17 +17,19 @@ try {
   const path = input?.transcript_path;
   if (profile() !== 'minimal' && project && typeof path === 'string') {
     const runs = await activeRuns(project);
-    const names = runs.length ? sessionRunNames(await transcriptEntries(path)) : new Set();
+    const entries = runs.length ? await transcriptEntries(path) : [];
+    const names = sessionRunNames(entries);
     const active = runs.find(({ state }) => worksOn(names, state.run));
     if (active) {
       const { state, directory } = active;
       const until = state.stage === 'release' ? Date.parse(state.updatedAt) + releaseTailMs : Infinity;
-      const calls = Date.now() <= until ? await sessionCalls(path, Date.parse(state.createdAt)) : null;
+      const calls = Date.now() <= until ? await sessionCalls(path, runStartedAt(entries, state.run) ?? Date.parse(state.createdAt)) : null;
       if (calls && Object.keys(calls).length) {
         let record;
         try { record = JSON.parse(await readRunFile(directory, usageFile) ?? '{}'); } catch { record = {}; }
         const merged = { ...(record?.calls ?? {}) };
-        for (const [id, counts] of Object.entries(calls)) if (!merged[id] || counts[1] > merged[id][1]) merged[id] = counts;
+        // A recorded call keeps its agent when a later copy of it carries none.
+        for (const [id, counts] of Object.entries(calls)) if (!merged[id] || counts[1] > merged[id][1]) merged[id] = counts.length > 4 || !merged[id] ? counts : [...counts, ...merged[id].slice(4)];
         const sessions = { ...(record?.sessions ?? {}), [basename(path, '.jsonl')]: new Date().toISOString() };
         await writeJsonAtomic(resolve(directory, usageFile), { schemaVersion: 2, sessions, calls: merged });
       }

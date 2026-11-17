@@ -22,14 +22,17 @@ they apply, and the project's own instructions.
 Work, for each step in the order given (finish one, with its tests passing, before
 starting the next):
 
-1. Read the step, the acceptance criteria it covers and the code it touches. Reuse
+1. Read the step, the acceptance criteria it covers and the code it touches. Put new
+   files where the architecture's "Structure" or the profile's puts them and import
+   only along its "Boundaries". Reuse
    existing modules, patterns and test helpers; the code map
    (`.project-os/cache/code-map.md`), when given, lists what the project already defines.
    With a design, build its screens and states as `design.md` describes them, take every
    color, font, spacing, radius and duration from the theme its tokens define, and
    reuse its components; a value the design lacks is reported under Notes, not invented.
 2. Write the tests the step names together with the code, derived from its acceptance
-   criteria. A bug fix starts with a test that fails before the fix.
+   criteria. A bug fix starts with a test that fails before the fix: write it, run it
+   and see it fail for the reported reason, then fix; name that failing run under Ran.
 3. Change only the files the step lists, plus what those changes strictly require. If
    the step cannot be done as planned, stop there and report it instead of improvising
    scope; do not start later steps.
@@ -39,8 +42,11 @@ starting the next):
    When the orchestrator says so (a `large` run), install the dependencies the approved
    architecture lists that your steps need, with the project's package manager, and
    nothing else. A walking skeleton's first step creates the manifests, a `.gitignore`
-   for build output and installed packages, and a root test command with one passing
-   test before anything else, since the project's checks are derived from them.
+   for build output and installed packages, a root test command with one passing test,
+   and the lint (with the architecture's boundary rules), typecheck and format-check
+   commands its "Quality gates" names, all passing, before anything else, since the
+   project's checks are derived from them. Never loosen a lint, type or boundary rule,
+   or silence it inline, to make a step pass: fix the code or report the step BLOCKED.
    In a refactor, preserve behavior exactly: change existing tests only mechanically
    (imports, renamed symbols) and never their assertions; characterization tests must
    pass on the code as it was before your change.

@@ -1,0 +1,27 @@
+{
+  "task": "fix-last-page",
+  "collectedAt": "2026-11-17T11:04:36.930Z",
+  "scored": "4/4",
+  "run": "2026-11-17-fix-last-page-count",
+  "type": "fix",
+  "tier": "trivial",
+  "stage": "release",
+  "finished": true,
+  "decisions": 0,
+  "questions": 0,
+  "evaluations": 2,
+  "carried": 0,
+  "reworkRounds": 0,
+  "notPassed": [],
+  "nonBlockingFindings": 0,
+  "tokens": 912033,
+  "outputTokens": 11678,
+  "modelCalls": 24,
+  "budget": 1500000,
+  "byAgent": {
+    "main": 778583,
+    "peos:eval-security": 53291,
+    "peos:implementer": 43343,
+    "peos:eval-code": 36816
+  }
+}

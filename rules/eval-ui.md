@@ -35,7 +35,16 @@ ui-capture manifest or the run's local preview. You judge what is visible, not t
 - A new console error on load or on a criterion's interaction.
 - A `serious` or `critical` `a11y` entry from the manifest on a changed screen.
 
+- On a changed screen, a sign listed under "Signs of a generated interface" in
+  `rules/design-craft.md` that neither `design.md` nor the existing screens show:
+  emoji as icons, placeholder or filler content, a decorative gradient or glow, a
+  second accent hue, the same kind of component drawn two ways.
+
 ## Medium
+
+- Another rule of `rules/design-craft.md` visibly broken on a changed screen: no single
+  strongest action, spacing that ignores grouping, cards around homogeneous rows, more
+  than three levels of text emphasis.
 
 - A value or component that ignores `design.md` or the profiled design system: a color,
   font, spacing or radius visibly outside the tokens, a hand-built control where the

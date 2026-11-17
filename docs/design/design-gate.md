@@ -31,7 +31,8 @@ architecture and the plan, with its own producer and evaluation.
   with layout and states, platform conventions and accessibility) and a self-contained
   `design-preview.html` that renders the tokens and the main screens. In an existing
   project it extends the profiled design system instead of inventing one.
-- **Evaluation.** `eval-plan` with focus `design` (key `plan-design`) judges the design
+- **Evaluation.** (Since 7f: `eval-design`, key `design`, which looks at the preview
+  rendered; see [quality-loop.md](quality-loop.md).) `eval-plan` with focus `design` (key `plan-design`) judged the design
   against the spec and the architecture.
 - **Freshness.** The design's hash covers `design.md` and the preview, so a fix to either
   is evaluated again and a preview changed after approval makes the gate stale. A new

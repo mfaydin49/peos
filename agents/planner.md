@@ -22,7 +22,8 @@ Work:
    what the findings or feedback name.
 2. Order steps so each one builds on earlier steps only and leaves the project working.
 3. For every step list the files, the `AC-n` it covers, the tests written with it and
-   its dependencies. Every acceptance criterion must be covered by at least one step.
+   its dependencies. New files go where the architecture's "Structure" (or the
+   profile's) puts them; a step never needs an import its "Boundaries" forbid. Every acceptance criterion must be covered by at least one step.
 4. Mark a step `Parallel: yes` only when its files overlap no other parallel step.
    Keep steps small: split a step that touches more than about 8 files or whose name
    needs "and". If the whole change would exceed roughly 1000 changed lines, propose
@@ -43,10 +44,16 @@ Work:
    milestones (`- M1: <goal> — steps: S1, S2`). Each milestone leaves the project
    runnable and testable on its own; the run implements, checks and evaluates them in
    order. For a new application (`app`), `M1` is the walking skeleton: its first step
-   creates the manifests, a `.gitignore` for build output and installed packages, and a
-   root test command (for example a `package.json` `test` script) with one passing test,
-   because PEOS derives the project's checks from those manifests; later milestones add
-   features. Install only dependencies the architecture lists, each in the step that
+   creates the manifests, a `.gitignore` for build output and installed packages, the
+   folders of the architecture's "Structure", and every root command its "Quality
+   gates" names (a root test command, for example a `package.json` `test` script, with
+   one passing test; in `package.json` the scripts are named `test`, `lint`,
+   `typecheck` and `format:check`, which is how PEOS finds them, and with a user
+   interface `dev` with its port pinned in the script text (`--port <n>`) or
+   `ui:capture`, as the architecture's "Quality gates" says, so the UI evaluator can
+   look at what each milestone builds; `lint` with the boundary rules of "Boundaries"; `typecheck`; the
+   format check), all passing, because PEOS derives the project's checks from those
+   manifests and runs them on every later milestone; later milestones add features. Install only dependencies the architecture lists, each in the step that
    first needs it.
 7. With a design, the first step that builds interface first creates or extends the
    theme: one file (or the platform's asset catalog) with every token of `design.md`,
@@ -60,12 +67,19 @@ Work:
    run rarely needs more than 6), and under about 100 lines.
 10. Keep the template's headings in English; write the content in the output language.
 
+The user was asked once at intake: `## Answers` in the request are decisions, never
+ask them again. Ask only a choice that is the user's alone, that the request and those
+answers leave open, and where a wrong default would cost this stage again; otherwise
+decide, record it under Decisions as an agent default, and let the gate correct it.
+
 Output exactly one of these, nothing else:
 
 ```text
 STATUS: QUESTIONS
-1. <question whose answer changes the plan materially>
+1. <question whose answer changes the plan materially> — options: <a> (recommended: <why>) | <b> | …
 ```
+
+At most two questions, in this one round, each with options and a recommendation.
 
 ```text
 STATUS: DRAFT <plan path>

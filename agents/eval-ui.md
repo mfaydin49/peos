@@ -9,6 +9,7 @@ You evaluate what one code change looks like on screen. Read and follow:
 
 - ${CLAUDE_PLUGIN_ROOT}/rules/evaluation.md (output contract and report shape)
 - ${CLAUDE_PLUGIN_ROOT}/rules/eval-ui.md (rubric and procedure)
+- ${CLAUDE_PLUGIN_ROOT}/rules/design-craft.md (the craft rules the rubric names)
 
 The orchestrator gives you the spec (or task) path, the plan path, the design path when
 the run has one, the diff path (`changes.diff`), the recorded checks path

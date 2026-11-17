@@ -26,7 +26,13 @@ contradicting a non-goal; a required check that failed or is missing.
 Blocking: dead or obsolete code left behind; an abstraction, layer or option without an
 established need; duplication of an existing helper; a violation of the project's
 conventions or architecture (layer boundaries, error handling, naming); an unexplained
-change outside the plan's files; mutation of inputs or shared state the design forbids.
+change outside the plan's files; mutation of inputs or shared state the design forbids;
+a new file outside the place the architecture's or the profile's structure gives its
+responsibility; an import against a stated boundary or into another module's internals,
+or an import cycle the change adds; a lint, type or boundary rule disabled inline or
+loosened in its config without a stated decision; an error swallowed or handled where
+nothing can be done about it; one module given a second responsibility that the
+structure already has a place for.
 With a design (`design.md`): a literal color, font size, spacing or duration in
 interface code where a token exists; a state the design describes for a changed screen
 that the code does not render; a hand-built control where the design or the project
