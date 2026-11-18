@@ -95,7 +95,8 @@ Before every new run and for `/peos:init`:
 5. `peos-run init --name <short-hyphenated-name> --type <type> --tier <tier>`. In its
    `directory`: for `standard` and `large`, write `idea.md` with the user's request and
    evidence word for word (no secrets or personal data), the answers of step 4 under
-   `## Answers` (question and answer, one line each), and `investigation.md` with the
+   `## Answers` (one line per question you actually asked: question and answer; no
+   section when you asked nothing), and `investigation.md` with the
    investigator's report word for word; for `trivial` and `small`, write `task.md` from
    `${CLAUDE_PLUGIN_ROOT}/templates/run/task.md` and the report, with its inline plan
    step `S1`, the answers under Decisions and only task-phase check IDs under
@@ -125,7 +126,7 @@ Agents answer with a status line:
   (tell the producer to take its recommendation), ask the rest in one round, add the
   answers to `## Answers` in `idea.md`, then spawn the same producer again with the
   same inputs plus the answers. `STATUS: DRAFT`: keep its summary lines for the gate message.
-- An implementer's `STEP Sn: DONE` blocks: call `next --done <those step IDs, comma-separated>`.
+- An implementer's `STEP Sn: DONE` lines: call `next --done <those step IDs, comma-separated>`.
   `BLOCKED`: stop and put the decision to the user. On a fix round, call `next`.
 - When `inputs.note` on an implementer says so, and every blocking finding only lacks
   check evidence, call `next --evidence-round` instead of spawning it. Never edit

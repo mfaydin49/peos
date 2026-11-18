@@ -1,0 +1,28 @@
+{
+  "task": "fix-last-page",
+  "collectedAt": "2026-11-17T21:44:04.368Z",
+  "scored": "4/4",
+  "run": "2026-11-17-notes-page-size-list",
+  "type": "fix",
+  "tier": "small",
+  "stage": "release",
+  "finished": true,
+  "decisions": 0,
+  "questions": 0,
+  "evaluations": 1,
+  "carried": 0,
+  "reworkRounds": 0,
+  "notPassed": [],
+  "nonBlockingFindings": 0,
+  "tokens": 198110,
+  "outputTokens": 11063,
+  "modelCalls": 6,
+  "budget": 3000000,
+  "byAgent": {
+    "peos:implementer": 67460,
+    "writer": 53723,
+    "peos:profiler": 33196,
+    "peos:eval-code": 31496,
+    "peos:investigator": 12235
+  }
+}

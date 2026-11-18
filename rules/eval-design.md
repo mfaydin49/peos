@@ -12,7 +12,9 @@ accessibility, the existing design system and `rules/design-craft.md`.
 2. Look at the preview rendered. With a `preview url`, open it in the isolated browser
    you have (the built-in browser pane or Playwright, never the user's own Chrome), at a
    desktop width (1440) and, for a mobile or responsive product, a phone width (390);
-   take a screenshot of each part of the page (scroll; at most 8 screenshots), and read
+   take a full-page screenshot when the tool has one, otherwise one per part of the
+   page (at most 5 images in all: each stays in your context and is read again on every
+   later step), and read
    the page text and the console messages once: a blocked script or network request
    there shows the preview tried to run or load one. Open only that URL; do not click, type or run scripts.
 3. Without a usable browser or URL, read `design-preview.html` as source instead, set

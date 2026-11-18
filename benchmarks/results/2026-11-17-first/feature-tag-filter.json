@@ -1,0 +1,28 @@
+{
+  "task": "feature-tag-filter",
+  "collectedAt": "2026-11-17T12:17:19.959Z",
+  "scored": "5/5",
+  "run": "2026-11-17-notes-tag-filter",
+  "type": "feature",
+  "tier": "small",
+  "stage": "release",
+  "finished": true,
+  "decisions": 0,
+  "questions": 0,
+  "evaluations": 1,
+  "carried": 0,
+  "reworkRounds": 0,
+  "notPassed": [],
+  "nonBlockingFindings": 0,
+  "tokens": 962739,
+  "outputTokens": 16245,
+  "modelCalls": 30,
+  "budget": 3000000,
+  "byAgent": {
+    "main": 807104,
+    "peos:implementer": 47361,
+    "peos:profiler": 38157,
+    "peos:eval-code": 35406,
+    "peos:investigator": 34711
+  }
+}

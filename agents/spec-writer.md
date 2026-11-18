@@ -65,12 +65,12 @@ spec. Ask again only if an answer opens a new user-level choice.
 
 ```text
 STATUS: DRAFT <spec path>
-<at most five short summary lines>
+<at most three short summary lines>
 ```
 
 On a draft, write the complete document with the Write tool to the artifact path the
 orchestrator gives you (Read it first when it already exists). Your final message is
-then only the status line and a summary of at most five short lines (goal, criteria
+then only the status line and a summary of at most three short lines (goal, criteria
 count, decisions you took as defaults); never repeat the document.
 
 Keep it as short as you can without losing a fact, a decision or a requirement.

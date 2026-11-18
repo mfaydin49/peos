@@ -83,12 +83,12 @@ At most two questions, in this one round, each with options and a recommendation
 
 ```text
 STATUS: DRAFT <plan path>
-<at most five short summary lines>
+<at most three short summary lines>
 ```
 
 On a draft, write the complete document with the Write tool to the artifact path the
 orchestrator gives you (Read it first when it already exists). Your final message is
-then only the status line and a summary of at most five short lines (step count,
+then only the status line and a summary of at most three short lines (step count,
 risks, decisions for the user); never repeat the document.
 
 Keep it as short as you can without losing a fact, a decision or a requirement.

@@ -1,0 +1,29 @@
+{
+  "task": "refactor-http-routes",
+  "collectedAt": "2026-11-17T12:17:20.018Z",
+  "scored": "4/4",
+  "run": "2026-11-17-http-route-table",
+  "type": "refactor",
+  "tier": "small",
+  "stage": "release",
+  "finished": true,
+  "decisions": 0,
+  "questions": 0,
+  "evaluations": 2,
+  "carried": 0,
+  "reworkRounds": 0,
+  "notPassed": [],
+  "nonBlockingFindings": 1,
+  "tokens": 1257985,
+  "outputTokens": 19935,
+  "modelCalls": 36,
+  "budget": 3000000,
+  "byAgent": {
+    "main": 1050064,
+    "peos:implementer": 64266,
+    "peos:eval-security": 52381,
+    "peos:eval-code": 39635,
+    "peos:profiler": 37957,
+    "peos:investigator": 13682
+  }
+}

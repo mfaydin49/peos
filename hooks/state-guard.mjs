@@ -74,7 +74,9 @@ async function writeAllowed(project, path) {
 const browserServer = /^mcp__((?:(?!__).)*(?:browser|playwright)(?:(?!__).)*)__/i;
 const lookingTools = new Set(['navigate', 'navigate_back', 'navigate_forward', 'computer', 'screenshot', 'take_screenshot', 'snapshot', 'read_page',
   'get_page_text', 'find', 'resize', 'resize_window', 'tabs', 'tabs_context', 'tabs_create', 'tabs_select', 'click', 'hover', 'press_key',
-  'wait_for', 'console_messages', 'read_console_messages', 'batch']);
+  'wait_for', 'console_messages', 'read_console_messages', 'batch',
+  // Color scheme and reduced motion are how the dark and reduced-motion states are seen.
+  'emulate_media', 'emulate']);
 // computer actions that only look, scroll, point or press keys; never typing text.
 const lookingActions = new Set(['screenshot', 'zoom', 'scroll', 'scroll_to', 'wait', 'hover', 'left_click', 'double_click', 'key']);
 const scheme = /^(?:[a-z][a-z0-9+.-]*:\/\/|(?:about|data|javascript|blob|file|view-source):)/i;
@@ -109,10 +111,19 @@ async function previewOrigins(project) {
   }
   return origins;
 }
+// A browser tool argument that names where to save something, at any depth (also in a batch).
+function namesFile(value, key = '') {
+  if (typeof value === 'string') return /^(?:file_?name|file|path|output_?path|save_?path|save_?as)$/i.test(key) && value.trim() !== '';
+  if (Array.isArray(value)) return value.some(item => namesFile(item, key));
+  return Boolean(value) && typeof value === 'object' && Object.entries(value).some(([name, item]) => namesFile(item, name));
+}
 async function uiToolRefusal(project, tool, args) {
   if (!browserServer.test(tool)) return 'The UI evaluator uses only an isolated browser (the built-in browser pane or Playwright), never the user\'s Chrome.';
   const refused = refusedTool(tool, args);
   if (refused) return `The UI evaluator only looks and clicks: ${refused}.`;
+  // A screenshot saved under a name lands in the project and changes the code state the
+  // evaluation certifies: images stay in the conversation.
+  if (namesFile(args)) return 'The UI evaluator writes no files: take the screenshot without a file name or path.';
   const urls = urlArguments(args).filter(value => !['back', 'forward'].includes(value));
   if (!urls.length) return null;
   const origins = project ? await previewOrigins(project) : [];

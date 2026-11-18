@@ -14,7 +14,7 @@ import { snapshotTree, treeExists } from './lib/snapshot.mjs';
 import { codeMap } from './lib/map.mjs';
 import { emptyProject, setupProject } from './lib/setup.mjs';
 import { summarizeUsage, usageFile } from './lib/usage.mjs';
-import { requireRoot, headCommit } from './lib/git.mjs';
+import { git, requireRoot, headCommit } from './lib/git.mjs';
 import {
   runsPath, types, tiers, stages, tierGates, gateArtifacts, gateEvalKeys, gateOrder, decisionGate, decisionGroup, designPreview, designRequested, runDirectory, runSubdirectory, readRunFile,
   readState, writeState, writeAtomic, writeJsonAtomic, withLock, artifactHash, configHash, fingerprint
@@ -183,6 +183,20 @@ async function ignoreInRun(directory, entry) {
   const current = await readFile(path, 'utf8').catch(() => '');
   if (!current.split('\n').includes(entry)) await writeAtomic(path, `${current}${current && !current.endsWith('\n') ? '\n' : ''}${entry}\n`);
 }
+// Browser tools leave screenshots and logs in the working directory (Playwright MCP writes
+// .playwright-mcp/). An evaluator that looks must not change the code state it certifies,
+// so that scratch is ignored in the repository's own, uncommitted exclude file.
+const browserScratch = ['.playwright-mcp/'];
+async function ignoreBrowserScratch(project) {
+  try {
+    const path = resolve(project, git(project, ['rev-parse', '--git-path', 'info/exclude']).trim());
+    const current = await readFile(path, 'utf8').catch(() => '');
+    const missing = browserScratch.filter(entry => !current.split('\n').includes(entry));
+    if (!missing.length) return;
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, `${current}${current && !current.endsWith('\n') ? '\n' : ''}${missing.join('\n')}\n`);
+  } catch { /* Without it a browser tool's files show up as a changed code state, which is reported. */ }
+}
 // With a run directory, a ui-capture check that runs writes into a fresh <run>/ui/ and its
 // manifest is validated: a capture that passes without usable screenshots fails
 // (eval-ui.md §5.2). Checks that run no capture leave the directory alone.
@@ -347,6 +361,7 @@ async function approve(project, options) {
         state.steps = steps;
         if (Object.keys(milestones).length) state.milestones = milestones; else delete state.milestones;
         await keepAsBases(directory, state);
+        delete state.polish;
         await rm(resolve(directory, 'summary.md'), { force: true });
       }
       state.planDigest = { steps: digest.steps, milestones: digest.milestones };
@@ -481,14 +496,17 @@ async function carryEval(project, options) {
     if (gateForEval[key] || !/^(?:code-[a-z]+|security|ui)$/.test(key ?? '')) fail('INVOCATION', '--key must be a code, security or ui evaluation.');
     const current = state.evals[key];
     // A base kept at a milestone boundary or plan re-approval judged another scope or plan:
-    // only the security evaluation, which judges no criteria, carries from one.
-    const base = current ? (current.verdict === 'PASS' ? current.tree : null) : key === 'security' ? state.evalBases?.[key]?.tree : null;
+    // only the security evaluation, which judges no criteria, and the UI evaluation, which
+    // judges what is on screen, carry from one, over a change that does not touch their
+    // subject. `next` never carries the UI evaluation of the last milestone.
+    const base = current ? (current.verdict === 'PASS' ? current.tree : null) : ['security', 'ui'].includes(key) ? state.evalBases?.[key]?.tree : null;
     if (!base || !treeExists(project, base)) fail('CARRY', `${key} has no passed snapshot of the same scope to carry.`);
     const codeState = await currentCodeState(project);
     const tree = await snapshotTree(project);
     if (!codeState || !tree) fail('CARRY', 'The current code state could not be snapshotted.');
     const change = treeChanges(project, base, tree);
-    if (change.files.length && !(key === 'security' && !change.securityTriggers.length)) fail('CARRY', `The change since ${key} passed needs an evaluator.`);
+    const untouched = key === 'security' ? !change.securityTriggers.length : key === 'ui' ? !change.uiTriggers.length : false;
+    if (change.files.length && !untouched) fail('CARRY', `The change since ${key} passed needs an evaluator.`);
     if (await currentCodeState(project) !== codeState) fail('UNSTABLE', 'The code changed while the evaluation was carried.');
     const evals = await runSubdirectory(directory, 'evals');
     const source = await readRunFile(evals, current ? `${key}.json` : `${key}.base.json`);
@@ -608,6 +626,7 @@ async function previewStart(project, options) {
   const config = await loadConfig(project);
   if (!config.preview) fail('PREVIEW', 'No preview is configured in .project-os/engineering.config.json.');
   await ignoreInRun(directory, 'preview.json');
+  await ignoreBrowserScratch(project);
   const preview = await startPreview(project, directory, config.preview);
   return { run: state.run, ...preview, viewports: config.preview.viewports, colorSchemes: config.preview.colorSchemes };
 }
@@ -657,11 +676,22 @@ async function serveDesign(project, options) {
   const file = resolve(directory, designPreview);
   if (!(await lstat(file).catch(() => null))?.isFile()) return { url: null };
   await ignoreInRun(directory, 'preview.json');
+  await ignoreBrowserScratch(project);
   return { url: await startDesignPreview(project, directory, file) };
+}
+// The run's one polish round was handed out; it is not offered again.
+async function polish(project, options) {
+  const directory = await runDirectory(project, options.run);
+  return withLock(directory, async () => {
+    const state = await readState(directory);
+    state.polish = 'done';
+    await writeState(directory, state);
+    return { run: state.run, polish: state.polish };
+  });
 }
 // The run's control flow: the next action for the orchestrator (design peos-next.md).
 function nextAction(project, options) {
-  return next(project, options, { status, advance, step, recordEval, changes, delta, carryEval, map, setup, completeMilestone, designGate, serveDesign });
+  return next(project, options, { status, advance, step, recordEval, changes, delta, carryEval, map, setup, completeMilestone, designGate, serveDesign, polish });
 }
 
 const handlers = { init, status, brief, begin, finish, next: nextAction, 'record-checks': recordChecks, 'record-eval': recordEval, approve, revise, 'reset-eval': resetEval, advance, step, grant, changes, delta, 'carry-eval': carryEval, 'record-baseline': recordBaseline, map, setup,

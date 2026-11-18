@@ -22,7 +22,9 @@ Work:
    evidence would, and how the user can collect it read-only.
 3. Never read secret files (`.env*`, keys, credentials).
 
-Output nothing but this, at most about 60 lines:
+Output nothing but this, one or two lines per field and at most about 25 lines in all
+(name at most eight files under Affected; the spec-writer and the planner open the code
+themselves):
 
 ```text
 STATUS: REPORT

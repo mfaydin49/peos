@@ -132,6 +132,12 @@ The run's control flow is in `peos-run next` ([design](docs/design/peos-next.md)
 decides the next agent, check or gate from the recorded state, so the orchestrator only
 carries it out and a resumed run continues exactly where it stopped.
 
+The same run can be driven from a terminal without an orchestrating session, which
+uses a fraction of the tokens (0.20M instead of 0.91M on the reference fix):
+`node scripts/peos-drive.mjs start --project . "<request>"`. It is a prototype
+([design](docs/design/drive.md)): small runs are measured, gates and UI evaluation
+through it are not yet.
+
 `/peos:status <run>` shows the run's token use against its tier budget and per agent,
 so a costly stage is visible. To see whether a change to PEOS itself made runs better
 or only different, run the [reference tasks](benchmarks/README.md) before and after it.

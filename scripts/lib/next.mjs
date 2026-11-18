@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fail, ToolkitError } from './cli.mjs';
 import { loadConfig } from './config.mjs';
-import { digest, signature } from './eval-report.mjs';
+import { digest, mediumFindings, signature } from './eval-report.mjs';
 import { headCommit } from './git.mjs';
 import { codeMapPath } from './map.mjs';
 import { decisionGroup, designRequested, gateArtifacts, gateEvalKeys, gateOrder, readRunFile } from './run-state.mjs';
@@ -385,8 +385,13 @@ async function decide(project, context, { options, errors, h }) {
       let basis = null;
       if (base) {
         const since = await deltaSince(base.tree);
-        // Nothing changed, or nothing security-relevant for the security evaluation: the PASS holds.
-        if (since.tree && base.passed && (key === 'security' ? !since.securityTriggers.length : since.empty && !base.kept)) {
+        // Nothing changed, nothing security-relevant for the security evaluation, or nothing
+        // of the interface for the UI evaluation: the PASS holds. The last milestone's UI
+        // evaluation is never carried from an earlier scope: it is the release evidence.
+        const untouched = key === 'security' ? !since.securityTriggers.length
+          : key === 'ui' && !final ? !since.uiTriggers.length
+          : since.empty && !base.kept;
+        if (since.tree && base.passed && untouched) {
           // A carry that fails (Git slow or the code moving) falls back to an evaluator.
           try { await h.carryEval(project, { run, key }); return { applied: `carried ${key}` }; }
           catch (error) { if (!(error instanceof ToolkitError)) throw error; }
@@ -428,7 +433,23 @@ async function decide(project, context, { options, errors, h }) {
     return { do: 'spawn', then: 'next', agents: [{ agent: 'peos:implementer', inputs: { ...implementerInputs, findings, 'unmet criteria': [...new Set(unmetCriteria)],
       note: 'If every blocking finding only lacks check evidence and no code needs to change, do not spawn the implementer: call next --evidence-round instead.' } }] };
   }
-  // Everything passed on this code state.
+  // Everything passed on this code state. Before the run ends, the implementer gets one
+  // polish round for the medium findings the evaluations left: they never blocked, so
+  // nothing else would fix them. What it changes is checked and evaluated like any change.
+  if (final && !state.polish) {
+    const polish = [];
+    for (const { key } of evaluations) {
+      const report = await readJson(directory, `evals/${key}.json`);
+      if (report) polish.push(...mediumFindings(report).map(finding => ({ evaluation: key, ...finding })));
+    }
+    if (polish.length) {
+      if ((await h.map(project)).changed) return { applied: 'code map' };
+      // Marked before it is handed out: a round that was interrupted is not offered twice.
+      await h.polish(project, { run });
+      return { do: 'spawn', then: 'next', agents: [{ agent: 'peos:implementer', inputs: { ...implementerInputs, polish,
+        note: 'Polish round: these findings did not block. Fix each one that is clearly right and small; leave one that needs a decision or new scope and say which.' } }] };
+    }
+  }
   if (state.tier === 'large' && current && !current.implicit) {
     await h.completeMilestone(project, { run, milestone: current.id, final });
     if (!final) return { applied: `milestone ${current.id} done` };

@@ -76,4 +76,7 @@ export function digest(report) {
     nonBlocking: report.findings.length - blocking(report).length
   };
 }
+// What a polish round is given: the findings worth fixing that did not block.
+export const mediumFindings = report => report.findings.filter(finding => finding.severity === 'medium')
+  .map(({ id, file, problem, fix }) => ({ id, ...(file ? { file } : {}), problem, fix }));
 export const signature = report => JSON.stringify([...blocking(report).map(finding => `${finding.file ?? ''}|${finding.problem}`), ...unmet(report).map(criterion => criterion.id)].sort());

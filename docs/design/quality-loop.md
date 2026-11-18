@@ -101,3 +101,37 @@ question, no rework round, 0.9M tokens against a 1.5M budget (intake not yet cou
 about 0.06M more), 2.5 minutes. The orchestrating session used 85% of the tokens in 13
 model calls, each re-reading the host's own base context; fewer orchestrator turns per
 run is the next thing to measure before changing.
+
+## 6. Full set (2026-11-17, label `2026-11-17-first`)
+
+Run headless (`claude -p`), one session per task, results in `benchmarks/results/`.
+
+| Task | Tier | Scored | Tokens (budget) | Rework rounds | Questions | Decisions |
+| --- | --- | --- | --- | --- | --- | --- |
+| fix-last-page | trivial | 4/4 | 0.9M (1.5M) | 0 | 0 | 0 |
+| feature-tag-filter | small | 5/5 | 1.0M (3M) | 0 | 0 | 0 |
+| refactor-http-routes | small | 4/4 | 1.3M (3M) | 0 | 0 | 0 |
+| app-habits | large | 7/8 | 26.2M (30M) | 3 | 0 | 2 |
+
+What the application run showed:
+
+- The orchestrating session used 62% of the tokens (16.1M in 113 calls): its context is
+  re-read on every turn and grows over a long run. No agent used more than 12%.
+- The headless session had no browser, so `eval-design` judged the files (degraded) and
+  `eval-ui` returned BLOCKED at every milestone until screenshots were supplied by hand.
+  The evaluators driving a browser themselves is still not exercised.
+- `eval-ui` ran on a milestone that changed no interface. Fixed: a passed UI evaluation
+  now carries over a change without a UI trigger, except on the last milestone.
+- A screenshot taken mid-repaint produced a false finding; the implementer could not
+  reproduce it and changed the disabled button style instead, which `eval-code` quality
+  then blocked as a departure from the approved design. Fixed in the implementer's
+  instructions: a finding that cannot be reproduced is reported, not worked around.
+- Both tasks expected as `small or standard` were classified `small`, so the single
+  decision of a `standard` run is still not exercised by a real run.
+- Medium findings stay in the result (a wrapping progress cell at 1280 px, literal CSS
+  sizes, a duplicated dialog shell): only blocking findings go back to the implementer.
+  Fixed (7h): once everything passed on the last milestone, `next` hands the medium
+  findings of the current reports to the implementer in one polish round (`polish: done`
+  in the state, so it happens once; a re-approved plan gets its own). What the round
+  changes is checked and evaluated like any change; a finding that needs a decision is
+  left and named. Low findings are not handed out.

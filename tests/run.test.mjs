@@ -718,6 +718,19 @@ test('a code evaluation keeps a snapshot, delta shows only the change since it, 
   assert.equal(run(project, 'carry-eval', ['--run', name, '--key', 'security']).report.error.code, 'CARRY', 'a triggering change needs the evaluator');
 });
 
+test('a passed UI evaluation carries over a change that touches no interface, and not over one that does', async t => {
+  const { project, name, dir } = await start(t, 'small');
+  run(project, 'advance', ['--run', name, '--to', 'implement']);
+  await writeFile(resolve(project, 'index.html'), '<main><button>Create</button></main>\n');
+  await submit(t, project, name, { evaluator: 'ui', verdict: 'PASS', subject: run(project, 'fingerprint').report.codeState });
+  await writeFile(resolve(project, 'streak.js'), 'export const streak = weeks => weeks.length;\n');
+  const carried = run(project, 'carry-eval', ['--run', name, '--key', 'ui']).report;
+  assert.deepEqual([carried.verdict, carried.carried, carried.changedFiles], ['PASS', true, 1]);
+  assert.equal(JSON.parse(await readFile(resolve(dir, 'state.json'))).evals.ui.subject, run(project, 'fingerprint').report.codeState);
+  await writeFile(resolve(project, 'index.html'), '<main><button>Create</button><p>New</p></main>\n');
+  assert.equal(run(project, 'carry-eval', ['--run', name, '--key', 'ui']).report.error.code, 'CARRY', 'changed markup needs the evaluator');
+});
+
 test('lock files, project files and large sections are listed in the diff, not shown', async t => {
   const { project, name } = await start(t, 'small');
   run(project, 'advance', ['--run', name, '--to', 'implement']);

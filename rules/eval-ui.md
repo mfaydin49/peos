@@ -8,13 +8,17 @@ ui-capture manifest or the run's local preview. You judge what is visible, not t
 ## Procedure
 
 1. From the spec and the plan, list the screen, state, viewport and color scheme
-   combinations the criteria and the spec's screen table need. Cap at 12 observations
-   per round; when more are needed, observe every interface criterion once at its stated
-   viewport and name what you skipped in `notAssessed`. On a later round, observe again
-   the combinations behind the previous findings plus one per changed screen.
+   combinations the criteria and the spec's screen table need. Cap at 8 observations
+   per round (every image stays in your context and is read again on each later step);
+   when more are needed, observe every interface criterion once at its stated viewport
+   and name what you skipped in `notAssessed`. Before the last milestone, observe only
+   the screens and states that milestone built or changed. On a later round, observe
+   again the combinations behind the previous findings plus one per changed screen.
 2. For each combination: with screenshots, open the matching image; with a preview,
-   open the route, set the viewport and scheme, reach the state as the plan says, take a
-   screenshot and read the main region's accessibility tree and the console errors.
+   open the route, set the viewport and scheme, reach the state as the plan says and
+   take one screenshot, without a file name: you write no file but your report. Read
+   the main region's accessibility tree and the console errors
+   once per screen, not once per combination.
 3. Judge against the rules below. A criterion is `met` only when an observation showed
    it; its `evidence` names the screen, state, viewport and what was visible (the image
    file name when there is one).

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFile, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { check, config, fixture, git, jsonCli, repository, saveConfig } from './helpers.mjs';
 import { parsePlan, planDigest } from '../scripts/lib/next.mjs';
@@ -501,6 +501,12 @@ test('a large run with new screens decides spec, architecture and design at once
   assert.deepEqual([served.status, await served.text()], [200, '<p>preview</p>']);
   assert.match(served.headers.get('content-security-policy'), /default-src 'none'/);
   assert.equal((await fetch(`${designEval.agents[0].inputs['preview url']}/state.json`)).status, 404);
+  // What a browser tool leaves in the project while an evaluator looks is not a code change.
+  const untouched = fingerprint(project);
+  await mkdir(resolve(project, '.playwright-mcp'));
+  await writeFile(resolve(project, '.playwright-mcp/page.png'), 'screenshot');
+  assert.equal(fingerprint(project), untouched);
+  assert.equal(git(project, 'status', '--porcelain', '--', '.playwright-mcp'), '');
   await report(dir, 'design', { evaluator: 'design', verdict: 'PASS', subject: designEval.agents[0].inputs.subject });
   const gate = next(project, name);
   assert.deepEqual(gate.gates, ['spec', 'architecture', 'design'], 'one decision covers the direction');
@@ -626,4 +632,47 @@ test('a run recorded with the earlier design evaluation key keeps its evaluation
   await writeFile(path, JSON.stringify(state));
   assert.deepEqual(Object.keys((await readState(dir)).evals), ['design']);
   assert.equal(cliRun(project, 'status', ['--run', name]).assessment.evals.design.verdict, 'PASS');
+});
+
+test('a passed run gets one polish round for its medium findings, and its changes are checked and evaluated again', async t => {
+  const { project, name, dir } = await start(t, { tier: 'small' });
+  next(project, name);
+  await writeFile(resolve(dir, 'task.md'), '# Export\n## Acceptance criteria\n- AC-1: x\n## Plan\n- S1: export — files: a — covers: AC-1 — test: t\n');
+  next(project, name);
+  await writeFile(resolve(project, 'export.js'), 'export function toCsv() {}\n');
+  cliRun(project, 'finish', next(project, name, ['--done', 'S1']).args);
+  next(project, name);
+  const medium = { id: 'F1', severity: 'medium', file: 'export.js', problem: 'an empty list has no test', impact: 'a regression there goes unseen', fix: 'add a test for an empty list' };
+  const low = { id: 'F2', severity: 'low', problem: 'a name could be clearer', impact: 'none', fix: 'rename' };
+  await report(dir, 'code-all', { evaluator: 'code', focus: 'all', verdict: 'PASS', subject: fingerprint(project), findings: [medium, low] });
+  const polish = next(project, name);
+  assert.deepEqual([polish.do, agentsOf(polish).join(), polish.then], ['spawn', 'peos:implementer', 'next']);
+  assert.deepEqual(polish.agents[0].inputs.polish, [{ evaluation: 'code-all', id: 'F1', file: 'export.js', problem: 'an empty list has no test', fix: 'add a test for an empty list' }], 'medium only');
+  assert.equal(polish.agents[0].inputs.findings, undefined);
+  assert.equal(JSON.parse(await readFile(resolve(dir, 'state.json'))).polish, 'done');
+  // What the polish changes is a change like any other: checks, then the evaluation of the delta.
+  await writeFile(resolve(project, 'export.test.js'), 'import "./export.js";\n');
+  const again = next(project, name);
+  assert.deepEqual([again.do, again.command], ['run', 'finish']);
+  cliRun(project, 'finish', again.args);
+  const evaluate = next(project, name);
+  assert.deepEqual(agentsOf(evaluate), ['peos:eval-code']);
+  // A medium finding that is still there does not start a second round.
+  await report(dir, 'code-all', { evaluator: 'code', focus: 'all', verdict: 'PASS', subject: fingerprint(project), findings: [medium] });
+  const summary = next(project, name);
+  assert.deepEqual([summary.do, summary.stage], ['write', 'release']);
+});
+
+test('a polish round that changes nothing ends the run, and a run without medium findings has none', async t => {
+  const { project, name, dir } = await start(t, { tier: 'small' });
+  next(project, name);
+  await writeFile(resolve(dir, 'task.md'), '# Export\n## Acceptance criteria\n- AC-1: x\n## Plan\n- S1: export — files: a — covers: AC-1 — test: t\n');
+  next(project, name);
+  await writeFile(resolve(project, 'export.js'), 'export function toCsv() {}\n');
+  cliRun(project, 'finish', next(project, name, ['--done', 'S1']).args);
+  next(project, name);
+  await report(dir, 'code-all', { evaluator: 'code', focus: 'all', verdict: 'PASS', subject: fingerprint(project),
+    findings: [{ id: 'F1', severity: 'medium', problem: 'needs a product decision', impact: 'unclear', fix: 'ask' }] });
+  assert.equal(next(project, name).agents[0].inputs.polish.length, 1);
+  assert.deepEqual([next(project, name).do, next(project, name).stage], ['write', 'release'], 'the implementer left it: nothing to check again');
 });

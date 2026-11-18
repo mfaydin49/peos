@@ -77,7 +77,7 @@ At most two questions, in this one round, each with options and a recommendation
 
 ```text
 STATUS: DRAFT <design path>
-<at most five short summary lines: direction, screens, tokens added, preview path>
+<at most three short summary lines: direction, screens, tokens added, preview path>
 ```
 
 On a draft, write both files with the Write tool to the paths the orchestrator gives

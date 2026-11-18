@@ -72,7 +72,7 @@ At most three questions, in this one round, each with options and a recommendati
 
 ```text
 STATUS: DRAFT <architecture path>
-<at most five short summary lines: platform and stack, new dependencies, main risks>
+<at most three short summary lines: platform and stack, new dependencies, main risks>
 ```
 
 On a draft, write the complete document with the Write tool to the artifact path the
